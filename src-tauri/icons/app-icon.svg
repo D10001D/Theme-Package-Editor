@@ -1,0 +1,22 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M512 100H724C834.457 100 924 189.543 924 300V724C924 834.457 834.457 924 724 924H512V100Z" fill="url(#paint0_linear_300_471)"/>
+  <path d="M100 300C100 189.543 189.543 100 300 100H512V924H300C189.543 924 100 834.457 100 724V300Z" fill="url(#paint1_linear_300_471)"/>
+  <rect x="409" y="100" width="103" height="103" fill="white"/>
+  <rect x="409" y="306" width="103" height="103" fill="white"/>
+  <rect x="409" y="718" width="103" height="103" fill="white"/>
+  <rect x="409" y="512" width="103" height="103" fill="white"/>
+  <rect x="512" y="203" width="103" height="103" fill="white"/>
+  <rect x="512" y="615" width="103" height="103" fill="white"/>
+  <rect x="512" y="409" width="103" height="103" fill="white"/>
+  <rect x="512" y="821" width="103" height="103" fill="white"/>
+  <defs>
+    <linearGradient id="paint0_linear_300_471" x1="718" y1="100" x2="718" y2="924" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B73FF"/>
+      <stop offset="1" stop-color="#7559FF"/>
+    </linearGradient>
+    <linearGradient id="paint1_linear_300_471" x1="306" y1="100" x2="306" y2="924" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#39E6C9"/>
+      <stop offset="1" stop-color="#13BFA3"/>
+    </linearGradient>
+  </defs>
+</svg>
