@@ -1,0 +1,14 @@
+[package]
+name = "theme-package-editor"
+version = "1.0.0"
+description = "Theme Package Editor desktop application"
+authors = ["qtrade"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.5.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.10.3", features = [] }
+tauri-plugin-dialog = "2.7.0"
+tauri-plugin-fs = "2.5.0"

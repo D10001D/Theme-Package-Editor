@@ -1,0 +1,21 @@
+{
+  "name": "theme-package-editor",
+  "version": "1.0.0",
+  "description": "macOS desktop wrapper for Theme Package Editor built with Tauri",
+  "scripts": {
+    "build:web": "node ./scripts/build-web.mjs",
+    "tauri": "tauri",
+    "start": "tauri dev",
+    "dev": "tauri dev",
+    "build:mac": "tauri build",
+    "build:mac:app": "tauri build --bundles app"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-dialog": "^2.7.0",
+    "@tauri-apps/plugin-fs": "^2.5.0",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  }
+}
