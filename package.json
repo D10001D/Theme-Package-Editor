@@ -7,8 +7,8 @@
     "tauri": "tauri",
     "start": "tauri dev",
     "dev": "tauri dev",
-    "build:mac": "tauri build",
-    "build:mac:app": "tauri build --bundles app"
+    "build:mac": "node ./scripts/build-mac-universal.mjs",
+    "build:mac:app": "node ./scripts/build-mac-universal.mjs app"
   },
   "dependencies": {
     "@tauri-apps/plugin-dialog": "^2.7.0",
