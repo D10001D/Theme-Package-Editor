@@ -31,15 +31,18 @@
     --log-text:#d1d5db;
     --shadow:0 24px 60px rgba(0,0,0,.25);
     --toggle-shadow:0 12px 30px rgba(15,23,42,.18);
-    --editor-bg:#fbfaff;
-    --editor-panel:#ffffff;
-    --editor-gutter:#f2efff;
+    --editor-bg:var(--bg);
+    --editor-panel:var(--panel);
+    --editor-gutter:var(--surface-muted);
     --editor-text:#1f2340;
     --editor-muted:#8a8fb3;
-    --editor-line:rgba(106,80,229,.08);
-    --editor-selection:rgba(106,80,229,.14);
-    --editor-border:#e6e2ff;
+    --editor-line:rgba(15,23,42,.05);
+    --editor-selection:rgba(15,23,42,.1);
+    --editor-border:var(--line);
     --editor-hint-shadow:0 24px 50px rgba(0,0,0,.28);
+    --editor-cursor:var(--text);
+    --editor-scrollbar:rgba(100,116,139,.24);
+    --editor-scrollbar-hover:rgba(100,116,139,.36);
     --editor-token-keyword:#6A50E5;
     --editor-token-atom:#7c3aed;
     --editor-token-number:#0f766e;
@@ -92,15 +95,18 @@
     --log-text:#d4d4d8;
     --shadow:0 24px 60px rgba(0,0,0,.55);
     --toggle-shadow:0 12px 30px rgba(0,0,0,.48);
-    --editor-bg:#17141f;
-    --editor-panel:#1d1a27;
-    --editor-gutter:#15111d;
+    --editor-bg:var(--bg);
+    --editor-panel:var(--panel);
+    --editor-gutter:var(--surface-muted);
     --editor-text:#f3f1ff;
     --editor-muted:#9d97bf;
-    --editor-line:rgba(106,80,229,.14);
-    --editor-selection:rgba(106,80,229,.22);
-    --editor-border:rgba(255,255,255,.08);
+    --editor-line:rgba(255,255,255,.04);
+    --editor-selection:rgba(255,255,255,.1);
+    --editor-border:var(--line);
     --editor-hint-shadow:0 24px 50px rgba(0,0,0,.5);
+    --editor-cursor:var(--text);
+    --editor-scrollbar:rgba(161,161,170,.28);
+    --editor-scrollbar-hover:rgba(161,161,170,.38);
     --editor-token-keyword:#c4b5fd;
     --editor-token-atom:#f0abfc;
     --editor-token-number:#67e8f9;
@@ -399,21 +405,16 @@
     height:100%;
     display:flex;
     flex-direction:column;
-    background:var(--editor-bg);
+    border:1px solid var(--editor-border);
     border-radius:20px;
     overflow:hidden;
-  }
-  .code-editor-tip{
-    padding:12px 16px;
-    border-bottom:1px solid var(--editor-border);
-    color:rgba(248,248,242,.72);
-    background:rgba(0,0,0,.12);
-    font-size:12px;
-    letter-spacing:.01em;
+    background:var(--editor-bg);
   }
   .xml-editor{
     flex:1;
     min-height:0;
+    height:100%;
+    position:relative;
   }
   .xml-editor .CodeMirror{
     height:100%;
@@ -421,20 +422,23 @@
     color:var(--editor-text);
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     font-size:13px;
-    line-height:1.7;
+    line-height:1.75;
   }
   .xml-editor .CodeMirror-lines{
-    padding:8px 0 16px;
+    padding:14px 0 22px;
   }
   .xml-editor .CodeMirror-gutters{
     background:var(--editor-gutter);
     border-right:1px solid var(--editor-border);
+    min-width:56px;
+    box-shadow:inset -1px 0 0 rgba(255,255,255,.05);
   }
   .xml-editor .CodeMirror-linenumber{
     color:var(--editor-muted);
+    padding:0 14px 0 10px;
   }
   .xml-editor .CodeMirror-cursor{
-    border-left:2px solid #f8f8f0;
+    border-left:2px solid var(--editor-cursor);
   }
   .xml-editor .CodeMirror-selected,
   .xml-editor .CodeMirror-focused .CodeMirror-selected{
@@ -449,9 +453,31 @@
     background:var(--editor-line);
   }
   .xml-editor .CodeMirror-matchingtag{
-    background:rgba(106,80,229,.18);
-    outline:1px solid rgba(106,80,229,.4);
+    background:var(--editor-line);
+    outline:1px solid var(--editor-border);
     border-radius:4px;
+  }
+  .xml-editor .CodeMirror-scroll{
+    scrollbar-width:thin;
+    scrollbar-color:var(--editor-scrollbar) transparent;
+  }
+  .xml-editor .CodeMirror-scroll::-webkit-scrollbar{
+    width:12px;
+    height:12px;
+  }
+  .xml-editor .CodeMirror-scroll::-webkit-scrollbar-thumb{
+    background:var(--editor-scrollbar);
+    border:3px solid transparent;
+    border-radius:999px;
+    background-clip:padding-box;
+  }
+  .xml-editor .CodeMirror-scroll::-webkit-scrollbar-thumb:hover{
+    background:var(--editor-scrollbar-hover);
+    border:3px solid transparent;
+    background-clip:padding-box;
+  }
+  .xml-editor .CodeMirror-scroll::-webkit-scrollbar-track{
+    background:transparent;
   }
   .xml-editor .CodeMirror pre{
     color:var(--editor-text);
@@ -485,6 +511,8 @@
     color:var(--editor-text);
     box-shadow:var(--editor-hint-shadow);
     max-width:320px;
+    border:1px solid var(--editor-border);
+    backdrop-filter:blur(14px);
   }
   .CodeMirror-hint{
     border-radius:10px;
@@ -566,6 +594,7 @@
     color:var(--text);
   }
   .modal .row{display:flex;gap:8px;justify-content:flex-end}
+  .modal .row button{min-width:88px}
   .small{font-size:12px;color:var(--muted)}
   #modalDesc{white-space:pre-wrap;line-height:1.6}
   .multi-table{

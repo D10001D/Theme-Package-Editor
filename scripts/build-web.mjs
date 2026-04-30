@@ -97,6 +97,11 @@ const vendorAssets = [
     sourcePath: path.join(rootDir, "node_modules", "codemirror", "addon", "edit", "closetag.js")
   },
   {
+    devPath: "../node_modules/codemirror/addon/comment/comment.js",
+    distPath: "./vendor/codemirror-comment.js",
+    sourcePath: path.join(rootDir, "node_modules", "codemirror", "addon", "comment", "comment.js")
+  },
+  {
     devPath: "../node_modules/codemirror/addon/hint/show-hint.js",
     distPath: "./vendor/codemirror-show-hint.js",
     sourcePath: path.join(rootDir, "node_modules", "codemirror", "addon", "hint", "show-hint.js")
@@ -125,6 +130,11 @@ const vendorAssets = [
     devPath: "../node_modules/codemirror/addon/hint/anyword-hint.js",
     distPath: "./vendor/codemirror-anyword-hint.js",
     sourcePath: path.join(rootDir, "node_modules", "codemirror", "addon", "hint", "anyword-hint.js")
+  },
+  {
+    devPath: "../node_modules/js-beautify/js/lib/beautifier.min.js",
+    distPath: "./vendor/js-beautify.min.js",
+    sourcePath: path.join(rootDir, "node_modules", "js-beautify", "js", "lib", "beautifier.min.js")
   }
 ];
 

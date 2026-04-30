@@ -58,7 +58,8 @@
       </div>
       <div class="actions">
         <button id="deleteSelectedBtn" class="danger" style="display:none">删除所选</button>
-        <button id="saveTextBtn" style="display:none">保存文本</button>
+        <button id="formatTextBtn" style="display:none">格式化对齐</button>
+        <button id="saveTextBtn" style="display:none">保存</button>
         <label id="replaceLabel" class="filebtn" style="display:none">
           替换文件
           <input id="replaceInput" type="file" />
@@ -94,6 +95,7 @@
       <input id="modalPath" placeholder="输入文件路径" />
       <div class="row">
         <button id="modalCancel">取消</button>
+        <button id="modalExtra" style="display:none">额外操作</button>
         <button class="primary" id="modalOk">确认</button>
       </div>
     </div>
@@ -112,12 +114,14 @@
 <script src="../node_modules/codemirror/addon/edit/matchbrackets.js"></script>
 <script src="../node_modules/codemirror/addon/edit/matchtags.js"></script>
 <script src="../node_modules/codemirror/addon/edit/closetag.js"></script>
+<script src="../node_modules/codemirror/addon/comment/comment.js"></script>
 <script src="../node_modules/codemirror/addon/hint/show-hint.js"></script>
 <script src="../node_modules/codemirror/addon/hint/xml-hint.js"></script>
 <script src="../node_modules/codemirror/addon/hint/html-hint.js"></script>
 <script src="../node_modules/codemirror/addon/hint/css-hint.js"></script>
 <script src="../node_modules/codemirror/addon/hint/javascript-hint.js"></script>
 <script src="../node_modules/codemirror/addon/hint/anyword-hint.js"></script>
+<script src="../node_modules/js-beautify/js/lib/beautifier.min.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

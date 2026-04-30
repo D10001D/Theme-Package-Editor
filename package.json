@@ -14,6 +14,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-fs": "^2.5.0",
     "codemirror": "^5.65.20",
+    "js-beautify": "^1.15.4",
     "jszip": "^3.10.1"
   },
   "devDependencies": {

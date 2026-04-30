@@ -24,6 +24,10 @@ let originalBaseName = "theme";
 let originalExt = ".itz";
 let originalFullName = "theme.itz";
 let activeTextEditor = null;
+let activeEditorNodePath = null;
+let activeEditorSavedText = "";
+let activeEditorDirty = false;
+let allowNextOpenFileDialog = false;
 
 class FileNode {
   constructor({name, path, parent=null, isDir=false, data=null, zipChild=null, sourceZipPath=null}) {
@@ -68,6 +72,7 @@ function clearActiveTextEditor(){
     activeTextEditor.destroy();
   }
   activeTextEditor = null;
+  clearEditorTrackingState();
 }
 
 function setActiveTextEditor(editorApi){
@@ -81,6 +86,100 @@ function getActiveTextEditorValue(){
   }
   const fallbackEditor = document.getElementById("editor");
   return fallbackEditor ? fallbackEditor.value : "";
+}
+
+function setActiveTextEditorValue(nextValue){
+  if(activeTextEditor?.setValue){
+    activeTextEditor.setValue(nextValue);
+  }else{
+    const fallbackEditor = document.getElementById("editor");
+    if(fallbackEditor){
+      fallbackEditor.value = nextValue;
+    }
+  }
+  syncActiveEditorDirtyState();
+}
+
+function focusActiveTextEditor(){
+  if(activeTextEditor?.focus){
+    activeTextEditor.focus();
+    return;
+  }
+  const fallbackEditor = document.getElementById("editor");
+  fallbackEditor?.focus();
+}
+
+function updateSaveButtonState(){
+  const saveBtn = document.getElementById("saveTextBtn");
+  saveBtn.textContent = "保存";
+  saveBtn.classList.toggle("primary", activeEditorDirty);
+}
+
+function clearEditorTrackingState(){
+  activeEditorNodePath = null;
+  activeEditorSavedText = "";
+  activeEditorDirty = false;
+  updateSaveButtonState();
+}
+
+function beginTextEditingSession(node, text){
+  activeEditorNodePath = node?.path || null;
+  activeEditorSavedText = text;
+  activeEditorDirty = false;
+  updateSaveButtonState();
+}
+
+function syncActiveEditorDirtyState(){
+  const isEditingCurrentNode = !!selected && !selected.isDir && activeEditorNodePath === selected.path;
+  const nextDirty = isEditingCurrentNode && getActiveTextEditorValue() !== activeEditorSavedText;
+  if(activeEditorDirty === nextDirty) return;
+  activeEditorDirty = nextDirty;
+  updateSaveButtonState();
+}
+
+function hasUnsavedTextChanges(){
+  return !!activeEditorNodePath && activeEditorDirty;
+}
+
+function treeHasPendingChanges(node){
+  if(!node || node.deleted) return false;
+  if(node.modified) return true;
+  for(const child of node.children || []){
+    if(child.deleted || treeHasPendingChanges(child)) return true;
+  }
+  return false;
+}
+
+function hasPendingPackageChanges(){
+  return hasUnsavedTextChanges() || treeHasPendingChanges(rootNode);
+}
+
+function clearExportedFlags(node){
+  if(!node) return null;
+  if(node.deleted) return null;
+  node.modified = false;
+  if(node.children?.length){
+    node.children = node.children
+      .map(child => clearExportedFlags(child))
+      .filter(Boolean);
+  }
+  return node;
+}
+
+function syncSelectionMetaAfterExport(){
+  if(!selected) return;
+  const isPackageRoot = isPackageRootNode(selected);
+  document.getElementById("currentMeta").textContent = selected.isDir
+    ? (isPackageRoot
+      ? `主题包根目录 · ${getVisibleChildCount(selected)} 个项目`
+      : `${getVisibleChildCount(selected)} 个项目${selected.isArchiveContainer ? " · 内部压缩包" : ""}`)
+    : `${bytesToSize(selected.data?.length)}`;
+}
+
+function markCurrentPackageAsExported(){
+  clearExportedFlags(rootNode);
+  renderTree();
+  syncSelectionMetaAfterExport();
 }
 
 function ensureJsZipAvailable(){
@@ -131,7 +230,13 @@ function runModal(options={}){
     okText = "确认",
     cancelText = "取消",
     showCancel = true,
-    okClassName = "primary"
+    okClassName = "primary",
+    extraActionText = "",
+    extraActionClassName = "",
+    showExtraAction = false,
+    extraActionResult = "extra",
+    cancelActionResult = "cancel",
+    dismissActionResult = "cancel"
   } = options;
 
   const mask = document.getElementById("modalMask");
@@ -140,6 +245,7 @@ function runModal(options={}){
   const descEl = document.getElementById("modalDesc");
   const okBtn = document.getElementById("modalOk");
   const cancelBtn = document.getElementById("modalCancel");
+  const extraBtn = document.getElementById("modalExtra");
   const modal = mask.querySelector(".modal");
 
   return new Promise(resolve => {
@@ -147,6 +253,7 @@ function runModal(options={}){
       mask.style.display = "none";
       okBtn.onclick = null;
       cancelBtn.onclick = null;
+      extraBtn.onclick = null;
       mask.onclick = null;
       modal.onclick = null;
       input.onkeydown = null;
@@ -157,6 +264,9 @@ function runModal(options={}){
       okBtn.textContent = "确认";
       cancelBtn.textContent = "取消";
       cancelBtn.style.display = "";
+      extraBtn.textContent = "额外操作";
+      extraBtn.className = "";
+      extraBtn.style.display = "none";
       resolve(result);
     };
 
@@ -169,14 +279,18 @@ function runModal(options={}){
     okBtn.className = okClassName;
     cancelBtn.textContent = cancelText;
     cancelBtn.style.display = showCancel ? "" : "none";
+    extraBtn.textContent = extraActionText;
+    extraBtn.className = extraActionClassName;
+    extraBtn.style.display = showExtraAction ? "" : "none";
 
     modal.onclick = ev => ev.stopPropagation();
-    mask.onclick = ()=> cleanup({confirmed:false, value:""});
-    cancelBtn.onclick = ()=> cleanup({confirmed:false, value:input.value.trim()});
+    mask.onclick = ()=> cleanup({confirmed:false, value:"", action:dismissActionResult});
+    cancelBtn.onclick = ()=> cleanup({confirmed:false, value:input.value.trim(), action:cancelActionResult});
+    extraBtn.onclick = ()=> cleanup({confirmed:false, value:input.value.trim(), action:extraActionResult});
     input.onkeydown = ev => {
       if(ev.key === "Escape"){
         ev.preventDefault();
-        cleanup({confirmed:false, value:input.value.trim()});
+        cleanup({confirmed:false, value:input.value.trim(), action:dismissActionResult});
         return;
       }
       if(showInput && ev.key === "Enter"){
@@ -184,7 +298,7 @@ function runModal(options={}){
         okBtn.click();
       }
     };
-    okBtn.onclick = ()=> cleanup({confirmed:true, value:input.value.trim()});
+    okBtn.onclick = ()=> cleanup({confirmed:true, value:input.value.trim(), action:"ok"});
 
     mask.style.display = "flex";
     if(showInput){
@@ -217,6 +331,40 @@ async function appConfirm(message, options={}){
     okClassName: options.okClassName || "primary"
   });
   return result.confirmed;
+}
+
+async function appConfirmUnsavedTextChanges(){
+  const result = await runModal({
+    title: "未保存修改",
+    description: "当前文本有未保存的修改，是否先保存？",
+    showInput: false,
+    okText: "保存",
+    cancelText: "取消",
+    showCancel: true,
+    okClassName: "primary",
+    extraActionText: "不保存",
+    extraActionClassName: "",
+    showExtraAction: true,
+    extraActionResult: "discard"
+  });
+  return result.action;
+}
+
+async function appConfirmOpenNewPackage(){
+  const result = await runModal({
+    title: "打开新主题包",
+    description: "打开新的主题包前，建议先导出当前主题包，如果已经导出请忽略提示。",
+    showInput: false,
+    okText: "导出当前主题包",
+    cancelText: "打开新主题包",
+    showCancel: true,
+    okClassName: "primary",
+    cancelActionResult: "open",
+    dismissActionResult: "stay"
+  });
+  if(result.action === "ok") return "export";
+  if(result.action === "open") return "open";
+  return "stay";
 }
 
 async function isZipData(uint8){
@@ -268,6 +416,7 @@ function getEditorConfigForNode(node){
       label: XML_EXT.test(fileName) ? "XML" : "PLIST/XML",
       mode: "application/xml",
       completionKind: "xml",
+      formatKind: "xml",
       autoCompletionTrigger: XML_COMPLETION_TRIGGER,
       autoCloseTags: true,
       matchTags: {bothTags:true}
@@ -278,6 +427,7 @@ function getEditorConfigForNode(node){
       label: "HTML",
       mode: "text/html",
       completionKind: "html",
+      formatKind: "html",
       autoCompletionTrigger: XML_COMPLETION_TRIGGER,
       autoCloseTags: true,
       matchTags: {bothTags:true}
@@ -287,21 +437,24 @@ function getEditorConfigForNode(node){
     return {
       label: "JSON",
       mode: {name:"javascript", json:true},
-      completionKind: "text"
+      completionKind: "text",
+      formatKind: "json"
     };
   }
   if(JS_EXT.test(fileName)){
     return {
       label: "JavaScript",
       mode: "text/javascript",
-      completionKind: "javascript"
+      completionKind: "javascript",
+      formatKind: "javascript"
     };
   }
   if(CSS_EXT.test(fileName)){
     return {
       label: "CSS",
       mode: "text/css",
-      completionKind: "css"
+      completionKind: "css",
+      formatKind: "css"
     };
   }
   if(MARKDOWN_EXT.test(fileName)){
@@ -323,6 +476,249 @@ function getEditorConfigForNode(node){
     mode: null,
     completionKind: "text"
   };
+}
+
+function supportsFormatting(editorConfig){
+  return !!editorConfig?.formatKind;
+}
+
+function escapeMarkupText(text){
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeMarkupAttribute(text){
+  return escapeMarkupText(text).replace(/"/g, "&quot;");
+}
+
+function getSerializedMarkup(doc){
+  if(typeof XMLSerializer === "undefined") return "";
+  const serializer = new XMLSerializer();
+  return Array.from(doc.childNodes || [])
+    .map(node => serializer.serializeToString(node))
+    .join("");
+}
+
+function getMarkupTagName(tagText){
+  const match = tagText.match(/^<\/?\s*([^\s/>]+)/);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function isMarkupClosingTag(token){
+  return /^<\//.test(token);
+}
+
+function isMarkupSelfClosingTag(token){
+  return /^<[^!?/][^>]*\/>$/.test(token);
+}
+
+function isMarkupOpeningTag(token){
+  return /^<[^!?/][^>]*>$/.test(token);
+}
+
+function normalizeMarkupTextToken(token){
+  return token.replace(/\s+/g, " ").trim();
+}
+
+function prettyPrintMarkupTokens(serializedText){
+  const tokenRegex = /<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!DOCTYPE[\s\S]*?>|<\/?[^>]+>|[^<]+/gi;
+  const tokens = serializedText.match(tokenRegex) || [];
+  const lines = [];
+  let indent = 0;
+
+  for(let index = 0; index < tokens.length; index++){
+    const rawToken = tokens[index];
+    if(!rawToken) continue;
+    const trimmedToken = rawToken.trim();
+    if(!trimmedToken) continue;
+    const prefix = "  ".repeat(Math.max(indent, 0));
+
+    if(isMarkupClosingTag(trimmedToken)){
+      indent = Math.max(indent - 1, 0);
+      lines.push(`${"  ".repeat(indent)}${trimmedToken}`);
+      continue;
+    }
+
+    if(/^<\?/.test(trimmedToken) || /^<!DOCTYPE/i.test(trimmedToken) || /^<!--/.test(trimmedToken) || /^<!\[CDATA\[/.test(trimmedToken)){
+      lines.push(`${prefix}${trimmedToken}`);
+      continue;
+    }
+
+    if(isMarkupSelfClosingTag(trimmedToken)){
+      lines.push(`${prefix}${trimmedToken}`);
+      continue;
+    }
+
+    if(isMarkupOpeningTag(trimmedToken)){
+      const nextToken = tokens[index + 1] || "";
+      const nextTrimmed = nextToken.trim();
+      const nextNextToken = tokens[index + 2] || "";
+      const nextNextTrimmed = nextNextToken.trim();
+
+      if(
+        nextTrimmed &&
+        !nextTrimmed.startsWith("<") &&
+        isMarkupClosingTag(nextNextTrimmed) &&
+        getMarkupTagName(trimmedToken) === getMarkupTagName(nextNextTrimmed)
+      ){
+        lines.push(`${prefix}${trimmedToken}${normalizeMarkupTextToken(nextTrimmed)}${nextNextTrimmed}`);
+        index += 2;
+        continue;
+      }
+
+      lines.push(`${prefix}${trimmedToken}`);
+      indent += 1;
+      continue;
+    }
+
+    lines.push(`${prefix}${normalizeMarkupTextToken(trimmedToken)}`);
+  }
+
+  return lines.join("\n").trim();
+}
+
+function formatXmlText(sourceText){
+  const parser = new DOMParser().parseFromString(sourceText, "application/xml");
+  const parserError = parser.querySelector("parsererror");
+  if(parserError){
+    throw new Error("XML 结构有误，暂时无法格式化。");
+  }
+
+  const serializedMarkup = getSerializedMarkup(parser);
+  const xmlDeclarationMatch = sourceText.match(/^\s*(<\?xml[\s\S]*?\?>)/i);
+  const prettyPrinted = prettyPrintMarkupTokens(serializedMarkup);
+
+  if(xmlDeclarationMatch){
+    return prettyPrinted.startsWith(xmlDeclarationMatch[1])
+      ? prettyPrinted
+      : `${xmlDeclarationMatch[1]}\n${prettyPrinted}`.trim();
+  }
+
+  return prettyPrinted;
+}
+
+function serializeMarkupAttributes(node){
+  const attrs = Array.from(node.attributes || []);
+  if(attrs.length === 0) return "";
+  return attrs.map(attr => ` ${attr.name}="${escapeMarkupAttribute(attr.value)}"`).join("");
+}
+
+function formatMarkupNode(node, level, options){
+  const indent = "  ".repeat(level);
+  const isHtml = options.formatKind === "html";
+  const htmlVoidTags = options.htmlVoidTags;
+
+  switch(node.nodeType){
+    case Node.ELEMENT_NODE: {
+      const tagName = node.tagName;
+      const attrs = serializeMarkupAttributes(node);
+      const children = Array.from(node.childNodes || []).filter(child => {
+        return child.nodeType !== Node.TEXT_NODE || child.nodeValue.trim() !== "";
+      });
+      const isVoidHtml = isHtml && htmlVoidTags.has(tagName.toLowerCase());
+
+      if(children.length === 0){
+        if(isVoidHtml) return `${indent}<${tagName}${attrs}>`;
+        return options.formatKind === "xml"
+          ? `${indent}<${tagName}${attrs} />`
+          : `${indent}<${tagName}${attrs}></${tagName}>`;
+      }
+
+      if(children.length === 1){
+        const onlyChild = children[0];
+        if(onlyChild.nodeType === Node.TEXT_NODE){
+          const text = onlyChild.nodeValue.replace(/\s+/g, " ").trim();
+          return `${indent}<${tagName}${attrs}>${escapeMarkupText(text)}</${tagName}>`;
+        }
+        if(onlyChild.nodeType === Node.CDATA_SECTION_NODE){
+          return `${indent}<${tagName}${attrs}><![CDATA[${onlyChild.nodeValue}]]></${tagName}>`;
+        }
+      }
+
+      const renderedChildren = children
+        .map(child => formatMarkupNode(child, level + 1, options))
+        .filter(Boolean)
+        .join("\n");
+      return `${indent}<${tagName}${attrs}>\n${renderedChildren}\n${indent}</${tagName}>`;
+    }
+    case Node.TEXT_NODE: {
+      const text = node.nodeValue.replace(/\s+/g, " ").trim();
+      return text ? `${indent}${escapeMarkupText(text)}` : "";
+    }
+    case Node.CDATA_SECTION_NODE:
+      return `${indent}<![CDATA[${node.nodeValue}]]>`;
+    case Node.COMMENT_NODE:
+      return `${indent}<!--${node.nodeValue}-->`;
+    case Node.PROCESSING_INSTRUCTION_NODE:
+      return `${indent}<?${node.target}${node.data ? ` ${node.data}` : ""}?>`;
+    case Node.DOCUMENT_TYPE_NODE: {
+      const publicId = node.publicId ? ` PUBLIC "${node.publicId}"` : "";
+      const systemId = node.systemId ? `${publicId ? "" : " SYSTEM"} "${node.systemId}"` : "";
+      return `<!DOCTYPE ${node.name}${publicId}${systemId}>`;
+    }
+    default:
+      return "";
+  }
+}
+
+function formatMarkupText(sourceText, formatKind){
+  const parserType = formatKind === "html" ? "text/html" : "application/xml";
+  const parser = new DOMParser().parseFromString(sourceText, parserType);
+  if(formatKind === "xml"){
+    const parserError = parser.querySelector("parsererror");
+    if(parserError){
+      throw new Error("XML 结构有误，暂时无法格式化。");
+    }
+  }
+
+  const htmlVoidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+  const nodes = Array.from(parser.childNodes || []).filter(node => {
+    return node.nodeType !== Node.TEXT_NODE || node.nodeValue.trim() !== "";
+  });
+  const rendered = nodes
+    .map(node => formatMarkupNode(node, 0, {formatKind, htmlVoidTags}))
+    .filter(Boolean)
+    .join("\n");
+  const xmlDeclMatch = formatKind === "xml" ? sourceText.match(/^\s*(<\?xml[\s\S]*?\?>)/i) : null;
+  return xmlDeclMatch && !rendered.startsWith(xmlDeclMatch[1])
+    ? `${xmlDeclMatch[1]}\n${rendered}`.trim()
+    : rendered.trim();
+}
+
+function formatEditorText(text, editorConfig){
+  switch(editorConfig?.formatKind){
+    case "xml":
+      return formatXmlText(text);
+    case "html":
+      return formatMarkupText(text, editorConfig.formatKind);
+    case "javascript":
+      if(typeof js_beautify !== "function"){
+        throw new Error("JavaScript 格式化模块未加载。");
+      }
+      return js_beautify(text, {
+        indent_size: 2,
+        indent_char: " ",
+        preserve_newlines: true,
+        max_preserve_newlines: 2,
+        end_with_newline: text.endsWith("\n")
+      });
+    case "css":
+      if(typeof css_beautify !== "function"){
+        throw new Error("CSS 格式化模块未加载。");
+      }
+      return css_beautify(text, {
+        indent_size: 2,
+        indent_char: " ",
+        preserve_newlines: true,
+        end_with_newline: text.endsWith("\n")
+      });
+    case "json":
+      return `${JSON.stringify(JSON.parse(text), null, 2)}\n`.replace(/\n$/, text.endsWith("\n") ? "\n" : "");
+    default:
+      throw new Error("当前文件类型暂不支持格式化。");
+  }
 }
 
 function ensureXmlSchemaTag(schemaInfo, tagName){
@@ -535,15 +931,62 @@ function showEditorCompletion(editor, editorConfig){
   });
 }
 
+function toggleEditorComment(editor){
+  if(typeof editor?.toggleComment !== "function") return;
+  editor.toggleComment({
+    indent: true
+  });
+}
+
+function saveCurrentTextChanges(){
+  if(!selected || selected.isDir) return false;
+  const text = getActiveTextEditorValue();
+  selected.data = new TextEncoder().encode(text);
+  selected.modified = true;
+  activeEditorSavedText = text;
+  activeEditorDirty = false;
+  updateSaveButtonState();
+  renderTree();
+  document.getElementById("currentMeta").textContent = `${bytesToSize(selected.data?.length)} · 已修改`;
+  return true;
+}
+
+function discardCurrentTextChanges(){
+  if(!selected || selected.isDir) return false;
+  setActiveTextEditorValue(activeEditorSavedText);
+  activeEditorDirty = false;
+  updateSaveButtonState();
+  focusActiveTextEditor();
+  return true;
+}
+
+async function confirmLeaveWithUnsavedChanges(){
+  if(!hasUnsavedTextChanges()) return true;
+  const action = await appConfirmUnsavedTextChanges();
+  if(action === "cancel") return false;
+  if(action === "ok"){
+    saveCurrentTextChanges();
+    focusActiveTextEditor();
+    return false;
+  }
+  if(action === "discard"){
+    discardCurrentTextChanges();
+  }
+  return false;
+}
+
 function renderPlainTextEditor(viewer, text){
   const editor = document.createElement("textarea");
   editor.id = "editor";
   editor.spellcheck = false;
   editor.wrap = "off";
   editor.value = text;
+  editor.addEventListener("input", syncActiveEditorDirtyState);
   viewer.appendChild(editor);
   setActiveTextEditor({
-    getValue: ()=> editor.value
+    getValue: ()=> editor.value,
+    setValue: value => { editor.value = value; },
+    focus: ()=> editor.focus()
   });
 }
 
@@ -555,11 +998,6 @@ function renderCodeEditor(viewer, text, editorConfig){
 
   const shell = document.createElement("div");
   shell.className = "code-editor-shell";
-
-  const tip = document.createElement("div");
-  tip.className = "code-editor-tip";
-  tip.textContent = `${editorConfig.label} 代码编辑 · 自动高亮 · Ctrl/Cmd + Space 联想`;
-  shell.appendChild(tip);
 
   const host = document.createElement("div");
   host.className = "xml-editor";
@@ -583,6 +1021,8 @@ function renderCodeEditor(viewer, text, editorConfig){
       "Cmd-Space": cm => showEditorCompletion(cm, editorConfig),
       "Ctrl-S": ()=> document.getElementById("saveTextBtn").click(),
       "Cmd-S": ()=> document.getElementById("saveTextBtn").click(),
+      "Ctrl-/": cm => toggleEditorComment(cm),
+      "Cmd-/": cm => toggleEditorComment(cm),
       Tab: (cm)=>{
         if(cm.state.completionActive){
           cm.state.completionActive.pick();
@@ -607,14 +1047,17 @@ function renderCodeEditor(viewer, text, editorConfig){
       showEditorCompletion(cm, editorConfig);
     }
   });
+  editor.on("changes", ()=> syncActiveEditorDirtyState());
 
   setActiveTextEditor({
     getValue: ()=> editor.getValue(),
+    setValue: value => editor.setValue(value),
     destroy: ()=>{
       if(typeof editor.closeHint === "function"){
         editor.closeHint();
       }
-    }
+    },
+    focus: ()=> editor.focus()
   });
 }
 
@@ -631,6 +1074,7 @@ function getVisibleChildCount(node){
 
 function hideSelectionActions(){
   document.getElementById("deleteSelectedBtn").style.display = "none";
+  document.getElementById("formatTextBtn").style.display = "none";
   document.getElementById("saveTextBtn").style.display = "none";
   document.getElementById("replaceLabel").style.display = "none";
   document.getElementById("addTextBtn").style.display = "none";
@@ -814,8 +1258,13 @@ function renderNode(node, depth, parentEl, q){
     }
   };
 
-  el.onclick = (ev)=>{
+  el.onclick = async (ev)=>{
     ev.stopPropagation();
+
+    if(shouldConfirmBeforeSelectionChange(node, ev)){
+      const shouldContinue = await confirmLeaveWithUnsavedChanges();
+      if(!shouldContinue) return;
+    }
 
     if(isPackageRootNode(node)){
       multiSelectedPaths.clear();
@@ -971,6 +1420,13 @@ function refreshRightPanelAfterSelection(node){
   }
 }
 
+function shouldConfirmBeforeSelectionChange(targetNode, event){
+  if(!hasUnsavedTextChanges()) return false;
+  if(!targetNode) return false;
+  if(targetNode.path !== activeEditorNodePath) return true;
+  return !!(event?.shiftKey || event?.ctrlKey || event?.metaKey);
+}
+
 async function openNode(node){
   updateSidebarContext();
   const isPackageRoot = isPackageRootNode(node);
@@ -1036,8 +1492,12 @@ async function openNode(node){
   const looksText = TEXT_EXT.test(node.name) || await likelyText(node.data);
   if(looksText){
     const text = new TextDecoder("utf-8").decode(node.data);
-    renderCodeEditor(viewer, text, getEditorConfigForNode(node));
+    const editorConfig = getEditorConfigForNode(node);
+    renderCodeEditor(viewer, text, editorConfig);
+    beginTextEditingSession(node, text);
+    document.getElementById("formatTextBtn").style.display = supportsFormatting(editorConfig) ? "" : "none";
     document.getElementById("saveTextBtn").style.display = "";
+    updateSaveButtonState();
   }else{
     viewer.innerHTML = `<div class="drop">二进制文件：${escapeHtml(node.name)}<br><br><span class="small">可使用“替换文件”更新内容。</span></div>`;
   }
@@ -1155,6 +1615,52 @@ async function maybeLoadDemoFixture(){
   ], "sample.zip");
 }
 
+document.getElementById("openFileLabel").addEventListener("click", async (e)=>{
+  const input = document.getElementById("openFile");
+  if(!rootNode || !hasPendingPackageChanges()){
+    input.value = "";
+    return;
+  }
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const action = await appConfirmOpenNewPackage();
+  if(action === "export"){
+    await exportCurrentPackage();
+    return;
+  }
+  if(action !== "open"){
+    return;
+  }
+
+  allowNextOpenFileDialog = true;
+  input.value = "";
+  input.click();
+});
+
+document.getElementById("openFile").addEventListener("click", async (e)=>{
+  if(allowNextOpenFileDialog){
+    allowNextOpenFileDialog = false;
+    return;
+  }
+  if(!rootNode || !hasPendingPackageChanges()) return;
+  const input = document.getElementById("openFile");
+  e.preventDefault();
+  e.stopPropagation();
+  const action = await appConfirmOpenNewPackage();
+  if(action === "export"){
+    await exportCurrentPackage();
+    return;
+  }
+  if(action !== "open"){
+    return;
+  }
+  allowNextOpenFileDialog = true;
+  input.value = "";
+  input.click();
+});
+
 document.getElementById("openFile").addEventListener("change", async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
@@ -1259,6 +1765,7 @@ function clearCurrentPackage(){
 
 document.getElementById("clearBtn").addEventListener("click", async ()=>{
   if(!rootNode) return;
+  if(!(await confirmLeaveWithUnsavedChanges())) return;
   if(await appConfirm("是否关闭当前主题包？", {title:"关闭主题包"})){
     clearCurrentPackage();
   }
@@ -1289,12 +1796,23 @@ document.getElementById("collapseAllBtn").addEventListener("click", ()=>{
 
 
 document.getElementById("saveTextBtn").addEventListener("click", ()=>{
+  saveCurrentTextChanges();
+});
+
+document.getElementById("formatTextBtn").addEventListener("click", async ()=>{
   if(!selected || selected.isDir) return;
-  const text = getActiveTextEditorValue();
-  selected.data = new TextEncoder().encode(text);
-  selected.modified = true;
-  renderTree();
-  document.getElementById("currentMeta").textContent = `${bytesToSize(selected.data?.length)} · 已修改`;
+  const editorConfig = getEditorConfigForNode(selected);
+  if(!supportsFormatting(editorConfig)){
+    await appAlert("当前文件类型暂不支持格式化。", {title:"无法格式化"});
+    return;
+  }
+  try{
+    const formattedText = formatEditorText(getActiveTextEditorValue(), editorConfig);
+    setActiveTextEditorValue(formattedText);
+    focusActiveTextEditor();
+  }catch(err){
+    await appAlert(err?.message || "格式化失败，请检查文件内容是否完整。", {title:"格式化失败"});
+  }
 });
 
 document.getElementById("replaceInput").addEventListener("change", async (e)=>{
@@ -1593,10 +2111,10 @@ async function zipDirFromNode(dirNode){
   });
 }
 
-document.getElementById("exportBtn").addEventListener("click", async ()=>{
+async function exportCurrentPackage(){
   if(!rootNode){
     await appAlert("请先打开主题包文件", {title:"无法导出"});
-    return;
+    return false;
   }
   document.getElementById("viewer").innerHTML = `<div class="drop">正在重新打包，请稍候...</div>`;
   try{
@@ -1612,12 +2130,13 @@ document.getElementById("exportBtn").addEventListener("click", async ()=>{
 
       if(!filePath){
         document.getElementById("viewer").innerHTML = `<div class="drop">已取消导出。</div>`;
-        return;
+        return false;
       }
 
       await tauriApi.writeFile(filePath, data);
+      markCurrentPackageAsExported();
       document.getElementById("viewer").innerHTML = `<div class="drop">导出完成：${escapeHtml(filePath)}</div>`;
-      return;
+      return true;
     }
 
     if(window.themeDesktop?.isDesktopApp && typeof window.themeDesktop.saveFile === "function"){
@@ -1628,12 +2147,13 @@ document.getElementById("exportBtn").addEventListener("click", async ()=>{
 
       if(result?.canceled){
         document.getElementById("viewer").innerHTML = `<div class="drop">已取消导出。</div>`;
-        return;
+        return false;
       }
 
       const savedLabel = result?.filePath || exportName;
+      markCurrentPackageAsExported();
       document.getElementById("viewer").innerHTML = `<div class="drop">导出完成：${escapeHtml(savedLabel)}</div>`;
-      return;
+      return true;
     }
 
     const blob = new Blob([data], {type:"application/octet-stream"});
@@ -1643,11 +2163,18 @@ document.getElementById("exportBtn").addEventListener("click", async ()=>{
     a.download = exportName;
     a.click();
     setTimeout(()=> URL.revokeObjectURL(url), 1000);
+    markCurrentPackageAsExported();
     document.getElementById("viewer").innerHTML = `<div class="drop">导出完成：${escapeHtml(a.download)}</div>`;
+    return true;
   }catch(err){
     console.error(err);
     await appAlert(err?.message || "导出失败，请查看控制台错误。", {title:"导出失败"});
+    return false;
   }
+}
+
+document.getElementById("exportBtn").addEventListener("click", async ()=>{
+  await exportCurrentPackage();
 });
 
 document.getElementById("themeToggle").addEventListener("click", toggleTheme);
