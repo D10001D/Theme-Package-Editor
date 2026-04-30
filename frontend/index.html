@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Theme Package Editor</title>
+<script src="../node_modules/jszip/dist/jszip.min.js"></script>
+<link rel="stylesheet" href="../node_modules/codemirror/lib/codemirror.css" />
+<link rel="stylesheet" href="../node_modules/codemirror/theme/monokai.css" />
+<link rel="stylesheet" href="../node_modules/codemirror/addon/hint/show-hint.css" />
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="./logo.svg" alt="Theme Package Editor logo" />
+        <div class="title">Theme Package<br />Editor</div>
+      </div>
+      <div class="subtitle">主题包编辑工具：支持 .itz / .mtz / .zip 等主题包，可编辑后保持原格式导出。</div>
+      <div class="author-line">作者：0001D ｜ 微信LJ_0001D，小红书0001Design</div>
+    </div>
+    <div class="toolbar">
+      <label id="openFileLabel" class="filebtn primary">
+        打开主题包
+        <input id="openFile" type="file" />
+      </label>
+      <button class="primary" id="exportBtn" style="display:none">导出主题包</button>
+      <button id="clearBtn" style="display:none">清空</button>
+    </div>
+    <div id="treeWorkspace" class="tree-workspace" style="display:none">
+      <div class="tree-header-group">
+        <div class="section-bar">
+          <div class="section-title">主题结构</div>
+          <div class="section-actions">
+            <button id="expandAllBtn" class="link-btn">全部展开</button>
+            <button id="collapseAllBtn" class="link-btn">全部收起</button>
+          </div>
+        </div>
+        <div class="search">
+          <input id="searchInput" placeholder="搜索" />
+        </div>
+      </div>
+      <div id="tree" class="tree"></div>
+    </div>
+    <div id="treeEmptyState" class="tree-empty-state">
+      <div>
+        请先打开主题包
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div id="mainHeader" class="main-header" style="display:none">
+      <div style="min-width:0">
+        <div id="currentPath" class="path">未打开文件</div>
+        <div id="currentMeta" class="meta">请选择一个主题包文件开始</div>
+      </div>
+      <div class="actions">
+        <button id="deleteSelectedBtn" class="danger" style="display:none">删除所选</button>
+        <button id="saveTextBtn" style="display:none">保存文本</button>
+        <label id="replaceLabel" class="filebtn" style="display:none">
+          替换文件
+          <input id="replaceInput" type="file" />
+        </label>
+        <button id="addTextBtn" style="display:none">新增文本</button>
+        <button id="addFolderBtn" style="display:none">新增文件夹</button>
+        <label id="addFileLabel" class="filebtn" style="display:none">
+          新增文件
+          <input id="addFileInput" type="file" multiple />
+        </label>
+        <button id="renameBtn" style="display:none">重命名</button>
+        <button id="deleteBtn" class="danger" style="display:none">删除</button>
+      </div>
+    </div>
+    <div id="viewer" class="viewer">
+      <div class="empty">
+		<img class="brand-logo" src="./logo.svg" alt="Theme Package Editor logo" />
+        <div>
+		 <div class="name">Theme Package Editor</div>
+          <b>使用说明</b><br>
+          1. 点击左侧“打开主题包”选择主题包<br>
+          2. 点击文本文件可编辑，图片可预览/替换<br>
+          3. 修改完成后点击“导出主题包”
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="modalMask" class="modal-mask">
+    <div class="modal">
+      <h3 id="modalTitle">新增文本文件</h3>
+      <div id="modalDesc" class="small">路径示例：description.xml、icons/config.json、preview/readme.txt</div>
+      <input id="modalPath" placeholder="输入文件路径" />
+      <div class="row">
+        <button id="modalCancel">取消</button>
+        <button class="primary" id="modalOk">确认</button>
+      </div>
+    </div>
+  </div>
+  <button id="themeToggle" class="theme-toggle" title="切换深色和浅色模式" aria-label="切换深色和浅色模式">☾</button>
+
+<script src="../node_modules/codemirror/lib/codemirror.js"></script>
+<script src="../node_modules/codemirror/mode/xml/xml.js"></script>
+<script src="../node_modules/codemirror/mode/javascript/javascript.js"></script>
+<script src="../node_modules/codemirror/mode/css/css.js"></script>
+<script src="../node_modules/codemirror/mode/htmlmixed/htmlmixed.js"></script>
+<script src="../node_modules/codemirror/mode/markdown/markdown.js"></script>
+<script src="../node_modules/codemirror/mode/properties/properties.js"></script>
+<script src="../node_modules/codemirror/addon/fold/xml-fold.js"></script>
+<script src="../node_modules/codemirror/addon/edit/closebrackets.js"></script>
+<script src="../node_modules/codemirror/addon/edit/matchbrackets.js"></script>
+<script src="../node_modules/codemirror/addon/edit/matchtags.js"></script>
+<script src="../node_modules/codemirror/addon/edit/closetag.js"></script>
+<script src="../node_modules/codemirror/addon/hint/show-hint.js"></script>
+<script src="../node_modules/codemirror/addon/hint/xml-hint.js"></script>
+<script src="../node_modules/codemirror/addon/hint/html-hint.js"></script>
+<script src="../node_modules/codemirror/addon/hint/css-hint.js"></script>
+<script src="../node_modules/codemirror/addon/hint/javascript-hint.js"></script>
+<script src="../node_modules/codemirror/addon/hint/anyword-hint.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

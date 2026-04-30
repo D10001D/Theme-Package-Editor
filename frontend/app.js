@@ -1,526 +1,17 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Theme Package Editor</title>
-<script src="./vendor/jszip.min.js"></script>
-<script src="./node_modules/jszip/dist/jszip.min.js"></script>
-<style>
-  :root{
-    --bg:#f6f7fb;
-    --panel:#ffffff;
-    --line:#e5e7eb;
-    --text:#111827;
-    --muted:#6b7280;
-    --primary:#2563eb;
-    --primary2:#1d4ed8;
-    --danger:#dc2626;
-    --ok:#16a34a;
-    --code:#0f172a;
-    --surface:#ffffff;
-    --surface-hover:#f3f4f6;
-    --surface-muted:#f9fafb;
-    --inverse-text:#ffffff;
-    --icon-muted:#64748b;
-    --active-bg:#dbeafe;
-    --active-text:#1d4ed8;
-    --multi-bg:#fef3c7;
-    --multi-text:#92400e;
-    --multi-active-bg:#bfdbfe;
-    --multi-active-text:#1e40af;
-    --badge-bg:#64748b;
-    --badge-zip:#7c3aed;
-    --badge-modified:#ea580c;
-    --drop-border:#cbd5e1;
-    --drop-active:#eff6ff;
-    --overlay:rgba(15,23,42,.42);
-    --log-bg:#0f172a;
-    --log-text:#d1d5db;
-    --shadow:0 24px 60px rgba(0,0,0,.25);
-    --toggle-shadow:0 12px 30px rgba(15,23,42,.18);
-  }
-  body.theme-dark{
-    --bg:#0b1220;
-    --panel:#111827;
-    --line:#253247;
-    --text:#e5eefc;
-    --muted:#94a3b8;
-    --primary:#60a5fa;
-    --primary2:#93c5fd;
-    --danger:#ef4444;
-    --ok:#22c55e;
-    --code:#e5eefc;
-    --surface:#162033;
-    --surface-hover:#1d2a40;
-    --surface-muted:#0f172a;
-    --inverse-text:#eff6ff;
-    --icon-muted:#7f8ea3;
-    --active-bg:#173153;
-    --active-text:#93c5fd;
-    --multi-bg:#3a2b0f;
-    --multi-text:#fcd34d;
-    --multi-active-bg:#203b61;
-    --multi-active-text:#bfdbfe;
-    --badge-bg:#475569;
-    --badge-zip:#8b5cf6;
-    --badge-modified:#f97316;
-    --drop-border:#334155;
-    --drop-active:#172554;
-    --overlay:rgba(2,6,23,.72);
-    --log-bg:#020617;
-    --log-text:#cbd5e1;
-    --shadow:0 24px 60px rgba(0,0,0,.45);
-    --toggle-shadow:0 12px 30px rgba(0,0,0,.42);
-  }
-  *{box-sizing:border-box}
-  body{
-    margin:0;
-    height:100vh;
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",Arial,sans-serif;
-    color:var(--text);
-    background:var(--bg);
-    display:flex;
-    overflow:hidden;
-  }
-  .sidebar{
-    width:360px;
-    background:var(--panel);
-    border-right:1px solid var(--line);
-    display:flex;
-    flex-direction:column;
-    min-width:280px;
-  }
-  .topbar{
-    padding:14px;
-  }
-  .title{
-    font-weight:700;
-    font-size:18px;
-    margin-bottom:4px;
-  }
-  .subtitle{
-    color:var(--muted);
-    font-size:12px;
-    line-height:1.5;
-  }
-  .author-line{
-    margin-top:8px;
-    color:var(--muted);
-    font-size:12px;
-    line-height:1.5;
-  }
-  .toolbar{
-    padding:0 14px 14px;
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-    border-bottom:1px solid var(--line);
-  }
-  button,.filebtn{
-    border:1px solid var(--line);
-    background:var(--surface);
-    border-radius:8px;
-    padding:8px 10px;
-    cursor:pointer;
-    font-size:13px;
-    color:var(--text);
-  }
-  button:hover,.filebtn:hover{background:var(--surface-hover)}
-  button.primary{
-    background:var(--primary);
-    color:var(--inverse-text);
-    border-color:var(--primary);
-  }
-  button.primary:hover{background:var(--primary2)}
-  button.danger{
-    color:var(--inverse-text);
-    background:var(--danger);
-    border-color:var(--danger);
-  }
-  input[type=file]{display:none}
-  .search{
-    padding:0;
-  }
-  .search input{
-    width:100%;
-    padding:9px 10px;
-    border:1px solid var(--line);
-    border-radius:8px;
-    font-size:13px;
-    background:var(--surface);
-    color:var(--text);
-  }
-  .tree-workspace{
-    flex:1;
-    min-height:0;
-    display:flex;
-    flex-direction:column;
-  }
-  .tree-header-group{
-    padding:14px;
-    border-bottom:1px solid var(--line);
-    display:flex;
-    flex-direction:column;
-    gap:14px;
-  }
-  .tree-empty-state{
-    flex:1;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding:20px;
-    text-align:center;
-    color:var(--muted);
-    line-height:1.7;
-  }
-  .section-bar{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-  }
-  .section-title{
-    font-size:13px;
-    font-weight:700;
-  }
-  .section-actions{
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-    justify-content:flex-end;
-  }
-  .link-btn{
-    border:none;
-    background:transparent;
-    padding:0;
-    border-radius:0;
-    color:var(--primary);
-    font-size:12px;
-    line-height:1.4;
-  }
-  .link-btn:hover{
-    background:transparent;
-    color:var(--primary2);
-    text-decoration:underline;
-  }
-  .tree{
-    flex:1;
-    overflow:auto;
-    padding:10px 8px 30px;
-    font-size:13px;
-  }
-  .node{
-    display:flex;
-    align-items:center;
-    gap:6px;
-    padding:5px 8px;
-    border-radius:6px;
-    cursor:pointer;
-    white-space:nowrap;
-  }
-  .twisty{
-    width:14px;
-    height:14px;
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    color:var(--icon-muted);
-    font-size:11px;
-    flex:none;
-    user-select:none;
-  }
-  .twisty.empty{opacity:0}
-  .node:hover{background:var(--surface-hover)}
-  .node.active{background:var(--active-bg);color:var(--active-text)}
-  .node.multi-selected{
-    background:var(--multi-bg);
-    color:var(--multi-text);
-  }
-  .node.active.multi-selected{
-    background:var(--multi-active-bg);
-    color:var(--multi-active-text);
-  }
-  .indent{display:inline-block;width:16px;flex:none}
-  .badge{
-    font-size:11px;
-    color:var(--inverse-text);
-    background:var(--badge-bg);
-    border-radius:999px;
-    padding:1px 6px;
-    margin-left:auto;
-  }
-  .badge.modified{background:var(--badge-modified)}
-  .main{
-    flex:1;
-    display:flex;
-    flex-direction:column;
-    min-width:0;
-  }
-  .main-header{
-    height:62px;
-    background:var(--panel);
-    border-bottom:1px solid var(--line);
-    padding:10px 16px;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-  }
-  .path{
-    font-weight:700;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-  }
-  .meta{
-    font-size:12px;
-    color:var(--muted);
-    margin-top:3px;
-  }
-  .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-  .viewer{
-    flex:1;
-    overflow:auto;
-    padding:16px;
-    min-height:0;
-  }
-  .empty{
-    height:100%;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    text-align:center;
-    color:var(--muted);
-    line-height:1.7;
-  }
-  textarea{
-    width:100%;
-    height:100%;
-    min-height:calc(100vh - 165px);
-    display:block;
-    resize:vertical;
-    border:1px solid var(--line);
-    border-radius:10px;
-    padding:14px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    font-size:13px;
-    line-height:1.6;
-    background:var(--surface);
-    color:var(--code);
-    overflow:auto;
-    white-space:pre;
-    tab-size:2;
-  }
-  .image-wrap{
-    display:flex;
-    flex-direction:column;
-    gap:12px;
-    align-items:center;
-    justify-content:center;
-    min-height:100%;
-    text-align:center;
-  }
-  .image-wrap img{
-    max-width:100%;
-    max-height:calc(100vh - 190px);
-    border:1px solid var(--line);
-    border-radius:10px;
-    background:var(--surface);
-  }
-  .drop{
-    border:2px dashed var(--drop-border);
-    border-radius:14px;
-    background:var(--surface);
-    padding:26px;
-    text-align:center;
-    color:var(--muted);
-  }
-  .drop.drag{border-color:var(--primary);background:var(--drop-active)}
-  .log{
-    background:var(--log-bg);
-    color:var(--log-text);
-    padding:12px;
-    border-radius:10px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    font-size:12px;
-    line-height:1.6;
-    white-space:pre-wrap;
-    margin-top:14px;
-  }
-  .modal-mask{
-    position:fixed;
-    inset:0;
-    background:var(--overlay);
-    display:none;
-    align-items:center;
-    justify-content:center;
-    z-index:20;
-  }
-  .modal{
-    width:460px;
-    background:var(--panel);
-    border-radius:14px;
-    box-shadow:var(--shadow);
-    padding:18px;
-  }
-  .modal h3{margin:0 0 10px}
-  .modal input{
-    width:100%;
-    padding:10px;
-    border:1px solid var(--line);
-    border-radius:8px;
-    margin:8px 0 14px;
-    background:var(--surface);
-    color:var(--text);
-  }
-  .modal .row{display:flex;gap:8px;justify-content:flex-end}
-  .small{font-size:12px;color:var(--muted)}
-  #modalDesc{white-space:pre-wrap;line-height:1.6}
-  .multi-table{
-    width:100%;
-    border-collapse:collapse;
-    background:var(--surface);
-    border:1px solid var(--line);
-    border-radius:10px;
-    overflow:hidden;
-    font-size:13px;
-  }
-  .multi-table th,
-  .multi-table td{
-    border-bottom:1px solid var(--line);
-    padding:10px 12px;
-    text-align:left;
-    vertical-align:middle;
-  }
-  .multi-table th{
-    background:var(--surface-muted);
-    color:var(--muted);
-    font-weight:600;
-  }
-  .multi-table tr:last-child td{border-bottom:none}
-  .multi-name{
-    max-width:520px;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-  }
-  .theme-toggle{
-    position:fixed;
-    right:14px;
-    bottom:14px;
-    width:40px;
-    height:40px;
-    border:1px solid var(--line);
-    border-radius:999px;
-    background:var(--surface);
-    color:var(--text);
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    padding:0;
-    font-size:18px;
-    box-shadow:var(--toggle-shadow);
-    z-index:30;
-  }
-  .theme-toggle:hover{
-    background:var(--surface-hover);
-  }
-</style>
-</head>
-<body>
-  <aside class="sidebar">
-    <div class="topbar">
-      <div class="title">Theme Package Editor</div>
-      <div class="subtitle">本地浏览器工具：支持 .itz / .mtz / .zip 等主题包，可编辑后保持原格式导出。</div>
-      <div class="author-line">作者：0001D ｜ 微信LJ_0001D，小红书0001Design</div>
-    </div>
-    <div class="toolbar">
-      <label class="filebtn">
-        打开主题包
-        <input id="openFile" type="file" />
-      </label>
-      <button class="primary" id="exportBtn" style="display:none">导出主题包</button>
-      <button id="clearBtn" style="display:none">清空</button>
-    </div>
-    <div id="treeWorkspace" class="tree-workspace" style="display:none">
-      <div class="tree-header-group">
-        <div class="section-bar">
-          <div class="section-title">主题结构</div>
-          <div class="section-actions">
-            <button id="expandAllBtn" class="link-btn">全部展开</button>
-            <button id="collapseAllBtn" class="link-btn">全部收起</button>
-          </div>
-        </div>
-        <div class="search">
-          <input id="searchInput" placeholder="搜索文件名，例如 png / xml / icon" />
-        </div>
-        <div class="small" style="line-height:1.5">
-          多选：Shift 连续选择；Windows 用 Ctrl 点选；Mac 用 Command 点选。
-        </div>
-      </div>
-      <div id="tree" class="tree"></div>
-    </div>
-    <div id="treeEmptyState" class="tree-empty-state">
-      <div>
-        请先打开主题包
-      </div>
-    </div>
-  </aside>
-
-  <main class="main">
-    <div class="main-header">
-      <div style="min-width:0">
-        <div id="currentPath" class="path">未打开文件</div>
-        <div id="currentMeta" class="meta">请选择一个主题包文件开始</div>
-      </div>
-      <div class="actions">
-        <button id="deleteSelectedBtn" class="danger" style="display:none">删除所选</button>
-        <button id="saveTextBtn" style="display:none">保存文本</button>
-        <label id="replaceLabel" class="filebtn" style="display:none">
-          替换文件
-          <input id="replaceInput" type="file" />
-        </label>
-        <button id="addTextBtn" style="display:none">新增文本</button>
-        <button id="addFolderBtn" style="display:none">新增文件夹</button>
-        <label id="addFileLabel" class="filebtn" style="display:none">
-          新增文件
-          <input id="addFileInput" type="file" multiple />
-        </label>
-        <button id="renameBtn" style="display:none">重命名</button>
-        <button id="deleteBtn" class="danger" style="display:none">删除</button>
-      </div>
-    </div>
-    <div id="viewer" class="viewer">
-      <div class="empty">
-        <div>
-          <b>使用说明</b><br>
-          1. 点击左侧“打开主题包”选择主题包<br>
-          2. 点击文本文件可编辑，图片可预览/替换<br>
-          3. 修改完成后点击“导出主题包”
-        </div>
-      </div>
-    </div>
-  </main>
-
-  <div id="modalMask" class="modal-mask">
-    <div class="modal">
-      <h3 id="modalTitle">新增文本文件</h3>
-      <div id="modalDesc" class="small">路径示例：description.xml、icons/config.json、preview/readme.txt</div>
-      <input id="modalPath" placeholder="输入文件路径" />
-      <div class="row">
-        <button id="modalCancel">取消</button>
-        <button class="primary" id="modalOk">确认</button>
-      </div>
-    </div>
-  </div>
-  <button id="themeToggle" class="theme-toggle" title="切换深色和浅色模式" aria-label="切换深色和浅色模式">☾</button>
-
-<script>
 const THEME_STORAGE_KEY = "theme-package-editor-theme";
 const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];
 const TEXT_EXT = /\.(txt|xml|json|ini|cfg|conf|css|html|js|md|csv|properties|theme|manifest|plist)$/i;
 const IMG_EXT = /\.(png|jpg|jpeg|webp|gif|bmp|svg)$/i;
+const XML_EXT = /\.xml$/i;
+const HTML_EXT = /\.html?$/i;
+const JSON_EXT = /\.json$/i;
+const JS_EXT = /\.js$/i;
+const CSS_EXT = /\.css$/i;
+const MARKDOWN_EXT = /\.md$/i;
+const PROPERTIES_EXT = /\.(ini|cfg|conf|properties)$/i;
+const PLIST_EXT = /\.plist$/i;
+const XML_COMPLETION_TRIGGER = new Set(["<", "/", " ", "=", "\"", "'"]);
+const XML_COMMON_ATTRS = ["id", "name", "type", "path", "value", "src", "width", "height", "color"];
 
 let rootZip = null;
 let rootNode = null;
@@ -532,6 +23,7 @@ let lastClickedPath = null;
 let originalBaseName = "theme";
 let originalExt = ".itz";
 let originalFullName = "theme.itz";
+let activeTextEditor = null;
 
 class FileNode {
   constructor({name, path, parent=null, isDir=false, data=null, zipChild=null, sourceZipPath=null}) {
@@ -564,6 +56,31 @@ function bytesToSize(bytes){
   let i=0,n=bytes;
   while(n>=1024&&i<units.length-1){n/=1024;i++;}
   return `${n.toFixed(i?1:0)} ${units[i]}`;
+}
+
+function pushUnique(list, value){
+  if(value == null || value === "") return;
+  if(!list.includes(value)) list.push(value);
+}
+
+function clearActiveTextEditor(){
+  if(activeTextEditor?.destroy){
+    activeTextEditor.destroy();
+  }
+  activeTextEditor = null;
+}
+
+function setActiveTextEditor(editorApi){
+  clearActiveTextEditor();
+  activeTextEditor = editorApi;
+}
+
+function getActiveTextEditorValue(){
+  if(activeTextEditor?.getValue){
+    return activeTextEditor.getValue();
+  }
+  const fallbackEditor = document.getElementById("editor");
+  return fallbackEditor ? fallbackEditor.value : "";
 }
 
 function ensureJsZipAvailable(){
@@ -713,6 +230,394 @@ function joinNodePath(parentPath, name){
   return parentPath ? `${parentPath}/${name}` : name;
 }
 
+function isPackageRootNode(node){
+  return !!node && node === rootNode;
+}
+
+function getNodeLabel(node){
+  return isPackageRootNode(node) ? originalFullName : (node?.name || "root");
+}
+
+function getNodeIcon(node){
+  return isPackageRootNode(node)
+    ? "🗂️"
+    : node.isDir
+      ? (node.isArchiveContainer ? "🗜️" : "📁")
+      : fileIcon(node.name);
+}
+
+function getNodeTypeLabel(node){
+  if(isPackageRootNode(node)) return "主题包根目录";
+  if(node.isDir) return node.isArchiveContainer ? "无后缀文件" : "文件夹";
+  if(IMG_EXT.test(node.name)) return "图片";
+  if(TEXT_EXT.test(node.name)){
+    const ext = node.name.includes(".") ? node.name.split(".").pop()?.trim() : "";
+    return ext ? ext.toUpperCase() : "文本";
+  }
+  return "其它文件";
+}
+
+function isXmlFile(node){
+  return !!node && !node.isDir && XML_EXT.test(node.name);
+}
+
+function getEditorConfigForNode(node){
+  const fileName = node?.name || "";
+  if(XML_EXT.test(fileName) || PLIST_EXT.test(fileName)){
+    return {
+      label: XML_EXT.test(fileName) ? "XML" : "PLIST/XML",
+      mode: "application/xml",
+      completionKind: "xml",
+      autoCompletionTrigger: XML_COMPLETION_TRIGGER,
+      autoCloseTags: true,
+      matchTags: {bothTags:true}
+    };
+  }
+  if(HTML_EXT.test(fileName)){
+    return {
+      label: "HTML",
+      mode: "text/html",
+      completionKind: "html",
+      autoCompletionTrigger: XML_COMPLETION_TRIGGER,
+      autoCloseTags: true,
+      matchTags: {bothTags:true}
+    };
+  }
+  if(JSON_EXT.test(fileName)){
+    return {
+      label: "JSON",
+      mode: {name:"javascript", json:true},
+      completionKind: "text"
+    };
+  }
+  if(JS_EXT.test(fileName)){
+    return {
+      label: "JavaScript",
+      mode: "text/javascript",
+      completionKind: "javascript"
+    };
+  }
+  if(CSS_EXT.test(fileName)){
+    return {
+      label: "CSS",
+      mode: "text/css",
+      completionKind: "css"
+    };
+  }
+  if(MARKDOWN_EXT.test(fileName)){
+    return {
+      label: "Markdown",
+      mode: "text/x-markdown",
+      completionKind: "text"
+    };
+  }
+  if(PROPERTIES_EXT.test(fileName)){
+    return {
+      label: "配置文件",
+      mode: "text/x-properties",
+      completionKind: "text"
+    };
+  }
+  return {
+    label: "文本",
+    mode: null,
+    completionKind: "text"
+  };
+}
+
+function ensureXmlSchemaTag(schemaInfo, tagName){
+  if(!schemaInfo[tagName]){
+    schemaInfo[tagName] = {attrs:{}, children:[]};
+  }
+  return schemaInfo[tagName];
+}
+
+function registerXmlAttribute(target, attrName, attrValue){
+  if(!attrName) return;
+  if(!Object.prototype.hasOwnProperty.call(target, attrName)){
+    target[attrName] = [];
+  }
+  if(Array.isArray(target[attrName]) && attrValue){
+    pushUnique(target[attrName], attrValue);
+    if(target[attrName].length > 12){
+      target[attrName] = target[attrName].slice(0, 12);
+    }
+  }
+}
+
+function walkXmlElement(element, schemaInfo, globalAttrs, parentTagName=null){
+  const tagName = element?.tagName?.trim();
+  if(!tagName) return;
+
+  const tagInfo = ensureXmlSchemaTag(schemaInfo, tagName);
+  if(parentTagName){
+    const parentInfo = ensureXmlSchemaTag(schemaInfo, parentTagName);
+    pushUnique(parentInfo.children, tagName);
+  }else{
+    pushUnique(schemaInfo["!top"], tagName);
+  }
+
+  for(const attr of Array.from(element.attributes || [])){
+    registerXmlAttribute(tagInfo.attrs, attr.name, attr.value);
+    registerXmlAttribute(globalAttrs, attr.name, attr.value);
+  }
+
+  for(const child of Array.from(element.children || [])){
+    walkXmlElement(child, schemaInfo, globalAttrs, tagName);
+  }
+}
+
+function collectXmlSchemaFromText(xmlText, schemaInfo, globalAttrs){
+  const tagNames = [];
+  const tagPattern = /<([A-Za-z_][\w:.-]*)(?=[\s/>])([^<>]*)/g;
+  const attrPattern = /([A-Za-z_][\w:.-]*)\s*=\s*(["'])(.*?)\2/g;
+  let matched = false;
+  let match;
+
+  while((match = tagPattern.exec(xmlText))){
+    matched = true;
+    const tagName = match[1];
+    const attrsText = match[2] || "";
+    const tagInfo = ensureXmlSchemaTag(schemaInfo, tagName);
+    pushUnique(schemaInfo["!top"], tagName);
+    pushUnique(tagNames, tagName);
+
+    let attrMatch;
+    while((attrMatch = attrPattern.exec(attrsText))){
+      registerXmlAttribute(tagInfo.attrs, attrMatch[1], attrMatch[3]);
+      registerXmlAttribute(globalAttrs, attrMatch[1], attrMatch[3]);
+    }
+  }
+
+  for(const tagName of tagNames){
+    const tagInfo = ensureXmlSchemaTag(schemaInfo, tagName);
+    for(const childTagName of tagNames){
+      pushUnique(tagInfo.children, childTagName);
+    }
+  }
+
+  return matched;
+}
+
+function buildXmlSchemaInfo(xmlText){
+  const schemaInfo = {"!top":[]};
+  const globalAttrs = {};
+  let builtFromDom = false;
+
+  try{
+    const xmlDoc = new DOMParser().parseFromString(xmlText, "application/xml");
+    const parserError = xmlDoc.querySelector("parsererror");
+    if(!parserError){
+      const roots = Array.from(xmlDoc.childNodes).filter(node => node.nodeType === Node.ELEMENT_NODE);
+      for(const rootElement of roots){
+        walkXmlElement(rootElement, schemaInfo, globalAttrs);
+        builtFromDom = true;
+      }
+    }
+  }catch(err){
+    console.warn("构建 XML schema 失败，将退回到文本扫描。", err);
+  }
+
+  if(!builtFromDom){
+    collectXmlSchemaFromText(xmlText, schemaInfo, globalAttrs);
+  }
+
+  for(const attrName of XML_COMMON_ATTRS){
+    if(!Object.prototype.hasOwnProperty.call(globalAttrs, attrName)){
+      globalAttrs[attrName] = null;
+    }
+  }
+
+  const discoveredTags = Object.keys(schemaInfo).filter(name => !name.startsWith("!"));
+  if(schemaInfo["!top"].length === 0){
+    schemaInfo["!top"] = discoveredTags.slice(0, 24);
+  }
+  if(discoveredTags.length > 0){
+    schemaInfo["!attrs"] = globalAttrs;
+  }
+
+  return schemaInfo;
+}
+
+function normalizeHintText(hintItem){
+  if(typeof hintItem === "string") return hintItem;
+  return hintItem?.text || hintItem?.displayText || "";
+}
+
+function mergeHintResults(primaryHints, secondaryHints){
+  const primaryList = primaryHints?.list || [];
+  const secondaryList = secondaryHints?.list || [];
+  const mergedList = [];
+  const seen = new Set();
+
+  for(const sourceList of [primaryList, secondaryList]){
+    for(const hintItem of sourceList){
+      const key = normalizeHintText(hintItem);
+      if(!key || seen.has(key)) continue;
+      seen.add(key);
+      mergedList.push(hintItem);
+    }
+  }
+
+  if(mergedList.length === 0) return null;
+  const usePrimaryRange = primaryList.length > 0;
+  return {
+    list: mergedList,
+    from: usePrimaryRange ? primaryHints.from : (secondaryHints?.from || primaryHints?.from),
+    to: usePrimaryRange ? primaryHints.to : (secondaryHints?.to || primaryHints?.to)
+  };
+}
+
+function getXmlCompletionHints(editor){
+  if(typeof CodeMirror === "undefined") return null;
+  const schemaInfo = buildXmlSchemaInfo(editor.getValue());
+  const xmlHints = CodeMirror.hint.xml(editor, {
+    schemaInfo,
+    matchInMiddle: true
+  });
+  const anyWordHints = CodeMirror.hint.anyword(editor, {
+    range: 200,
+    word: /[\w:-]+/
+  });
+  return mergeHintResults(xmlHints, anyWordHints) || xmlHints || anyWordHints;
+}
+
+function getAnyWordCompletionHints(editor){
+  if(typeof CodeMirror === "undefined") return null;
+  return CodeMirror.hint.anyword(editor, {
+    range: 250,
+    word: /[\w:-]+/
+  });
+}
+
+function getEditorCompletionHints(editor, editorConfig){
+  if(typeof CodeMirror === "undefined") return null;
+  const textHints = getAnyWordCompletionHints(editor);
+  let modeHints = null;
+
+  switch(editorConfig?.completionKind){
+    case "xml":
+      modeHints = getXmlCompletionHints(editor);
+      break;
+    case "html":
+      modeHints = CodeMirror.hint.html?.(editor, {
+        matchInMiddle: true
+      }) || null;
+      break;
+    case "css":
+      modeHints = CodeMirror.hint.css?.(editor) || null;
+      break;
+    case "javascript":
+      modeHints = CodeMirror.hint.javascript?.(editor, {
+        useGlobalScope: false
+      }) || null;
+      break;
+    default:
+      modeHints = null;
+      break;
+  }
+
+  return mergeHintResults(modeHints, textHints) || modeHints || textHints;
+}
+
+function shouldTriggerEditorCompletion(change, editorConfig){
+  if(!change || change.origin === "setValue") return false;
+  const insertedText = change.text?.join("");
+  if(!insertedText || insertedText.length !== 1) return false;
+  return editorConfig?.autoCompletionTrigger?.has(insertedText) || false;
+}
+
+function showEditorCompletion(editor, editorConfig){
+  if(typeof CodeMirror === "undefined" || typeof editor?.showHint !== "function") return;
+  editor.showHint({
+    hint: cm => getEditorCompletionHints(cm, editorConfig),
+    completeSingle: false
+  });
+}
+
+function renderPlainTextEditor(viewer, text){
+  const editor = document.createElement("textarea");
+  editor.id = "editor";
+  editor.spellcheck = false;
+  editor.wrap = "off";
+  editor.value = text;
+  viewer.appendChild(editor);
+  setActiveTextEditor({
+    getValue: ()=> editor.value
+  });
+}
+
+function renderCodeEditor(viewer, text, editorConfig){
+  if(typeof CodeMirror === "undefined"){
+    renderPlainTextEditor(viewer, text);
+    return;
+  }
+
+  const shell = document.createElement("div");
+  shell.className = "code-editor-shell";
+
+  const tip = document.createElement("div");
+  tip.className = "code-editor-tip";
+  tip.textContent = `${editorConfig.label} 代码编辑 · 自动高亮 · Ctrl/Cmd + Space 联想`;
+  shell.appendChild(tip);
+
+  const host = document.createElement("div");
+  host.className = "xml-editor";
+  shell.appendChild(host);
+  viewer.appendChild(shell);
+
+  const editor = CodeMirror(host, {
+    value: text,
+    mode: editorConfig.mode,
+    lineNumbers: true,
+    lineWrapping: false,
+    indentUnit: 2,
+    tabSize: 2,
+    autofocus: true,
+    autoCloseTags: editorConfig.autoCloseTags || false,
+    autoCloseBrackets: true,
+    matchTags: editorConfig.matchTags || false,
+    matchBrackets: true,
+    extraKeys: {
+      "Ctrl-Space": cm => showEditorCompletion(cm, editorConfig),
+      "Cmd-Space": cm => showEditorCompletion(cm, editorConfig),
+      "Ctrl-S": ()=> document.getElementById("saveTextBtn").click(),
+      "Cmd-S": ()=> document.getElementById("saveTextBtn").click(),
+      Tab: (cm)=>{
+        if(cm.state.completionActive){
+          cm.state.completionActive.pick();
+          return;
+        }
+        if(cm.somethingSelected()){
+          cm.indentSelection("add");
+          return;
+        }
+        cm.replaceSelection("  ", "end", "+input");
+      },
+      "Shift-Tab": (cm)=>{
+        if(cm.somethingSelected()){
+          cm.indentSelection("subtract");
+        }
+      }
+    }
+  });
+
+  editor.on("inputRead", (cm, change)=>{
+    if(shouldTriggerEditorCompletion(change, editorConfig)){
+      showEditorCompletion(cm, editorConfig);
+    }
+  });
+
+  setActiveTextEditor({
+    getValue: ()=> editor.getValue(),
+    destroy: ()=>{
+      if(typeof editor.closeHint === "function"){
+        editor.closeHint();
+      }
+    }
+  });
+}
+
 function getTargetBaseDir(){
   if(!selected) return "";
   if(selected.isDir) return selected.path;
@@ -741,11 +646,15 @@ function updateSidebarContext(){
   const treeEmptyState = document.getElementById("treeEmptyState");
   const exportBtn = document.getElementById("exportBtn");
   const clearBtn = document.getElementById("clearBtn");
+  const mainHeader = document.getElementById("mainHeader");
+  const openFileLabel = document.getElementById("openFileLabel");
 
   exportBtn.style.display = hasPackage ? "inline-block" : "none";
   clearBtn.style.display = hasPackage ? "inline-block" : "none";
   treeWorkspace.style.display = hasPackage ? "flex" : "none";
   treeEmptyState.style.display = hasPackage ? "none" : "flex";
+  mainHeader.style.display = hasPackage ? "flex" : "none";
+  openFileLabel.classList.toggle("primary", !hasPackage);
 }
 
 function ensureDir(root, parts){
@@ -846,14 +755,13 @@ function renderTree(){
     return;
   }
   const frag = document.createDocumentFragment();
-  for(const child of rootNode.children){
-    renderNode(child, 0, frag, q);
-  }
+  renderNode(rootNode, 0, frag, q);
   tree.appendChild(frag);
 }
 
 function nodeMatches(node, q){
   if(!q) return true;
+  if(getNodeLabel(node).toLowerCase().includes(q)) return true;
   if(node.path.toLowerCase().includes(q)) return true;
   if(node.isDir) return node.children.some(c => nodeMatches(c,q));
   return false;
@@ -882,10 +790,10 @@ function renderNode(node, depth, parentEl, q){
   }
 
   const icon = document.createElement("span");
-  icon.textContent = node.isDir ? (node.isArchiveContainer ? "🗜️" : "📁") : fileIcon(node.name);
+  icon.textContent = getNodeIcon(node);
 
   const name = document.createElement("span");
-  name.textContent = node.name;
+  name.textContent = getNodeLabel(node);
 
   el.appendChild(twisty);
   el.appendChild(icon);
@@ -909,9 +817,24 @@ function renderNode(node, depth, parentEl, q){
   el.onclick = (ev)=>{
     ev.stopPropagation();
 
-    const isToggleSelect = ev.ctrlKey || ev.metaKey; // Windows/Linux: Ctrl；Mac: Command
+    if(isPackageRootNode(node)){
+      multiSelectedPaths.clear();
+      multiSelectedPaths.add(node.path);
+      lastClickedPath = node.path;
+      selected = node;
+      refreshRightPanelAfterSelection(node);
+      renderTree();
+      return;
+    }
 
-    if(ev.shiftKey && lastClickedPath){
+    const isToggleSelect = ev.ctrlKey || ev.metaKey; // Windows/Linux: Ctrl；Mac: Command
+    const rootPath = rootNode?.path || "";
+
+    if(multiSelectedPaths.has(rootPath)){
+      multiSelectedPaths.delete(rootPath);
+    }
+
+    if(ev.shiftKey && lastClickedPath && lastClickedPath !== rootPath){
       const startIndex = visibleNodeOrder.indexOf(lastClickedPath);
       const endIndex = visibleNodeOrder.indexOf(node.path);
       if(startIndex !== -1 && endIndex !== -1){
@@ -958,7 +881,7 @@ function getSelectedNodes(){
   if(!rootNode) return [];
   return Array.from(multiSelectedPaths)
     .map(path => findNodeByPath(rootNode, path))
-    .filter(node => node && !node.deleted);
+    .filter(node => node && !node.deleted && !(isPackageRootNode(node) && multiSelectedPaths.size > 1));
 }
 
 async function showMultiSelectionTable(){
@@ -975,6 +898,7 @@ async function showMultiSelectionTable(){
       <thead>
         <tr>
           <th>素材名称</th>
+          <th>类型</th>
           <th>文件容量</th>
           <th>图片尺寸</th>
         </tr>
@@ -991,7 +915,20 @@ async function showMultiSelectionTable(){
     const nameTd = document.createElement("td");
     nameTd.className = "multi-name";
     nameTd.title = node.path;
-    nameTd.textContent = node.path || node.name;
+    const nameContent = document.createElement("div");
+    nameContent.className = "multi-name-content";
+    const nameIcon = document.createElement("span");
+    nameIcon.className = "multi-name-icon";
+    nameIcon.textContent = getNodeIcon(node);
+    const nameText = document.createElement("span");
+    nameText.className = "multi-name-text";
+    nameText.textContent = node.path || node.name;
+    nameContent.appendChild(nameIcon);
+    nameContent.appendChild(nameText);
+    nameTd.appendChild(nameContent);
+
+    const typeTd = document.createElement("td");
+    typeTd.textContent = getNodeTypeLabel(node);
 
     const sizeTd = document.createElement("td");
     sizeTd.textContent = node.isDir ? "--" : bytesToSize(node.data?.length);
@@ -1000,6 +937,7 @@ async function showMultiSelectionTable(){
     dimensionTd.textContent = "--";
 
     tr.appendChild(nameTd);
+    tr.appendChild(typeTd);
     tr.appendChild(sizeTd);
     tr.appendChild(dimensionTd);
     tbody.appendChild(tr);
@@ -1035,9 +973,12 @@ function refreshRightPanelAfterSelection(node){
 
 async function openNode(node){
   updateSidebarContext();
-  document.getElementById("currentPath").textContent = node.path || "/";
+  const isPackageRoot = isPackageRootNode(node);
+  document.getElementById("currentPath").textContent = isPackageRoot ? originalFullName : (node.path || "/");
   document.getElementById("currentMeta").textContent = node.isDir
-    ? `${getVisibleChildCount(node)} 个项目${node.isArchiveContainer ? " · 内部压缩包" : ""}`
+    ? (isPackageRoot
+      ? `主题包根目录 · ${getVisibleChildCount(node)} 个项目`
+      : `${getVisibleChildCount(node)} 个项目${node.isArchiveContainer ? " · 内部压缩包" : ""}`)
     : `${bytesToSize(node.data?.length)}${node.modified ? " · 已修改" : ""}`;
 
   hideSelectionActions();
@@ -1049,13 +990,17 @@ async function openNode(node){
   document.getElementById("deleteBtn").style.display = node === rootNode ? "none" : "";
 
   const viewer = document.getElementById("viewer");
+  clearActiveTextEditor();
   viewer.innerHTML = "";
 
   if(node.isDir){
     viewer.innerHTML = `
       <div class="drop">
-        <b>${escapeHtml(node.name || "root")}</b><br>
-        ${node.isArchiveContainer ? "这是一个内部无后缀 ZIP，导出时会自动回写为原来的无后缀压缩文件。" : "文件夹"}
+        <div class="drop-icon">${escapeHtml(getNodeIcon(node))}</div>
+        <b>${escapeHtml(getNodeLabel(node))}</b><br>
+        ${isPackageRoot
+          ? "这是主题包根目录"
+          : (node.isArchiveContainer ? "这是一个无后缀文件，导出时会自动回写为原来的无后缀文件。" : "文件夹")}
         <br><br>
         <span class="small">包含 ${getVisibleChildCount(node)} 个项目</span>
       </div>`;
@@ -1091,12 +1036,7 @@ async function openNode(node){
   const looksText = TEXT_EXT.test(node.name) || await likelyText(node.data);
   if(looksText){
     const text = new TextDecoder("utf-8").decode(node.data);
-    const editor = document.createElement("textarea");
-    editor.id = "editor";
-    editor.spellcheck = false;
-    editor.wrap = "off";
-    editor.value = text;
-    viewer.appendChild(editor);
+    renderCodeEditor(viewer, text, getEditorConfigForNode(node));
     document.getElementById("saveTextBtn").style.display = "";
   }else{
     viewer.innerHTML = `<div class="drop">二进制文件：${escapeHtml(node.name)}<br><br><span class="small">可使用“替换文件”更新内容。</span></div>`;
@@ -1131,18 +1071,17 @@ function applyLoadedRootNode(loadedRoot, fileName="theme.itz"){
   setOriginalFileName(fileName);
   multiSelectedPaths.clear();
   visibleNodeOrder = [];
-  lastClickedPath = null;
   rootNode = loadedRoot;
   sortTree(rootNode);
   setExpandedRecursive(rootNode, false);
   rootNode.expanded = true;
-  selected = null;
+  selected = rootNode;
+  multiSelectedPaths.add(rootNode.path);
+  lastClickedPath = rootNode.path;
   hideSelectionActions();
   updateSidebarContext();
   renderTree();
-  document.getElementById("currentPath").textContent = originalFullName;
-  document.getElementById("currentMeta").textContent = "已加载，可开始编辑";
-  document.getElementById("viewer").innerHTML = `<div class="drop">已打开：${escapeHtml(originalFullName)}<br><br>左侧选择文件进行预览或编辑。</div>`;
+  void openNode(rootNode);
 }
 
 function fixtureEntryToUint8Array(entry){
@@ -1297,6 +1236,7 @@ function clearCurrentPackage(){
   originalBaseName = "theme";
   originalExt = ".itz";
   originalFullName = "theme.itz";
+  clearActiveTextEditor();
 
   document.getElementById("openFile").value = "";
   document.getElementById("searchInput").value = "";
@@ -1350,11 +1290,11 @@ document.getElementById("collapseAllBtn").addEventListener("click", ()=>{
 
 document.getElementById("saveTextBtn").addEventListener("click", ()=>{
   if(!selected || selected.isDir) return;
-  const text = document.getElementById("editor").value;
+  const text = getActiveTextEditorValue();
   selected.data = new TextEncoder().encode(text);
   selected.modified = true;
   renderTree();
-  openNode(selected);
+  document.getElementById("currentMeta").textContent = `${bytesToSize(selected.data?.length)} · 已修改`;
 });
 
 document.getElementById("replaceInput").addEventListener("change", async (e)=>{
@@ -1715,6 +1655,3 @@ initTheme();
 updateSidebarContext();
 renderTree();
 void maybeLoadDemoFixture();
-</script>
-</body>
-</html>
