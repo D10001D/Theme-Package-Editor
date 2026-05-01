@@ -17,15 +17,19 @@
         <img class="brand-logo" src="./logo.svg" alt="Theme Package Editor logo" />
         <div class="title">Theme Package<br />Editor</div>
       </div>
-      <div class="subtitle">主题包编辑工具：支持 .itz / .mtz / .zip 等主题包，可编辑后保持原格式导出。</div>
+      <div class="subtitle">主题包编辑工具：支持 .itz / .mtz / .zip 等主题包，也支持文件夹导入与编辑。</div>
       <div class="author-line">作者：0001D ｜ 微信LJ_0001D，小红书0001Design</div>
     </div>
     <div class="toolbar">
-      <label id="openFileLabel" class="filebtn primary">
-        打开主题包
+      <div class="toolbar-menu-wrap">
+        <button id="importBtn" class="primary" type="button">导入</button>
+        <div id="importMenu" class="import-menu" hidden>
+          <button id="importPackageBtn" type="button">导入主题包</button>
+          <button id="importFolderBtn" type="button">导入文件夹</button>
+        </div>
         <input id="openFile" type="file" />
-      </label>
-      <button class="primary" id="exportBtn" style="display:none">导出主题包</button>
+        <input id="openFolder" type="file" webkitdirectory directory multiple />
+      </div>
       <button id="clearBtn" style="display:none">清空</button>
     </div>
     <div id="treeWorkspace" class="tree-workspace" style="display:none">
@@ -42,10 +46,15 @@
         </div>
       </div>
       <div id="tree" class="tree"></div>
+      <div class="tree-footer-actions">
+        <div id="treeFooterStatus" class="tree-footer-status" style="display:none"></div>
+        <button class="primary" id="savePackageBtn" style="display:none">保存</button>
+        <button class="primary" id="exportBtn" style="display:none">导出</button>
+      </div>
     </div>
     <div id="treeEmptyState" class="tree-empty-state">
       <div>
-        请先打开主题包
+        请先导入主题内容
       </div>
     </div>
   </aside>
@@ -54,12 +63,12 @@
     <div id="mainHeader" class="main-header" style="display:none">
       <div style="min-width:0">
         <div id="currentPath" class="path">未打开文件</div>
-        <div id="currentMeta" class="meta">请选择一个主题包文件开始</div>
+        <div id="currentMeta" class="meta">请选择一个主题包或文件夹开始</div>
       </div>
       <div class="actions">
         <button id="deleteSelectedBtn" class="danger" style="display:none">删除所选</button>
         <button id="formatTextBtn" style="display:none">格式化对齐</button>
-        <button id="saveTextBtn" style="display:none">保存</button>
+        <button id="saveTextBtn" style="display:none">保存文本</button>
         <label id="replaceLabel" class="filebtn" style="display:none">
           替换文件
           <input id="replaceInput" type="file" />
@@ -80,9 +89,9 @@
         <div>
 		 <div class="name">Theme Package Editor</div>
           <b>使用说明</b><br>
-          1. 点击左侧“打开主题包”选择主题包<br>
+          1. 点击左侧“导入”选择主题包或文件夹<br>
           2. 点击文本文件可编辑，图片可预览/替换<br>
-          3. 修改完成后点击“导出主题包”
+          3. 需要覆盖当前来源时点击“保存”，另存新包时点击“导出”
         </div>
       </div>
     </div>
@@ -100,6 +109,7 @@
       </div>
     </div>
   </div>
+  <div id="toastViewport" class="toast-viewport" aria-live="polite" aria-atomic="true"></div>
   <button id="themeToggle" class="theme-toggle" title="切换深色和浅色模式" aria-label="切换深色和浅色模式">☾</button>
 
 <script src="../node_modules/codemirror/lib/codemirror.js"></script>

@@ -27,7 +27,14 @@ let activeTextEditor = null;
 let activeEditorNodePath = null;
 let activeEditorSavedText = "";
 let activeEditorDirty = false;
-let allowNextOpenFileDialog = false;
+let importSourceKind = null;
+let importSourcePath = "";
+let importSourceHandle = null;
+let importSourceLabel = "";
+let pendingSourceDeletePaths = new Set();
+let latestSaveRecord = "";
+let latestExportRecord = "";
+let toastHideTimer = null;
 
 class FileNode {
   constructor({name, path, parent=null, isDir=false, data=null, zipChild=null, sourceZipPath=null}) {
@@ -52,6 +59,39 @@ function log(msg){
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+function showToast(message, options={}){
+  const {variant="success", duration=2200} = options;
+  const viewport = document.getElementById("toastViewport");
+  if(!viewport) return;
+
+  if(toastHideTimer){
+    clearTimeout(toastHideTimer);
+    toastHideTimer = null;
+  }
+
+  const iconMarkup = variant === "error"
+    ? `<svg viewBox="0 0 20 20" role="presentation" focusable="false"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="1.8"></circle><path d="M7 7l6 6M13 7l-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>`
+    : `<svg viewBox="0 0 20 20" role="presentation" focusable="false"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="1.8"></circle><path d="M6.5 10.3l2.2 2.3 4.8-5.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+  viewport.innerHTML = `
+    <div class="toast ${variant}">
+      <span class="toast-icon" aria-hidden="true">${iconMarkup}</span>
+      <span class="toast-text">${escapeHtml(message)}</span>
+    </div>
+  `;
+  const toast = viewport.firstElementChild;
+  requestAnimationFrame(()=> toast?.classList.add("show"));
+
+  toastHideTimer = setTimeout(()=>{
+    toast?.classList.remove("show");
+    setTimeout(()=>{
+      if(viewport.firstElementChild === toast){
+        viewport.innerHTML = "";
+      }
+    }, 180);
+    toastHideTimer = null;
+  }, duration);
 }
 
 function bytesToSize(bytes){
@@ -109,10 +149,82 @@ function focusActiveTextEditor(){
   fallbackEditor?.focus();
 }
 
+function canSaveCurrentSource(){
+  return !!rootNode && !!importSourceKind && (!!importSourcePath || !!importSourceHandle);
+}
+
+function getImportSourceLabel(){
+  return importSourcePath || importSourceLabel || originalFullName;
+}
+
+function formatOperationTime(date=new Date()){
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+function updateTreeFooterStatus(){
+  const statusEl = document.getElementById("treeFooterStatus");
+  if(!statusEl) return;
+  const hasPackage = !!rootNode;
+  const parts = [];
+  if(latestSaveRecord) parts.push(latestSaveRecord);
+  if(latestExportRecord) parts.push(latestExportRecord);
+  statusEl.style.display = hasPackage && parts.length > 0 ? "block" : "none";
+  statusEl.textContent = parts.join("  ");
+}
+
+function clearOperationRecords(){
+  latestSaveRecord = "";
+  latestExportRecord = "";
+  updateTreeFooterStatus();
+}
+
+function recordOperation(type){
+  const timestamp = formatOperationTime();
+  if(type === "save"){
+    latestSaveRecord = `${timestamp} 已保存`;
+  }else if(type === "export"){
+    latestExportRecord = `${timestamp} 已导出`;
+  }
+  updateTreeFooterStatus();
+}
+
+function renderOperationSuccess(actionText, targetPath){
+  const viewer = document.getElementById("viewer");
+  viewer.innerHTML = `
+    <div class="operation-success">
+      <div class="operation-success-icon" aria-hidden="true">
+        <svg viewBox="0 0 32 32" role="presentation" focusable="false">
+          <circle cx="16" cy="16" r="14" fill="currentColor" opacity="0.14"></circle>
+          <path d="M10 16.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+      </div>
+      <div class="operation-success-text">${escapeHtml(actionText)}</div>
+      <div class="operation-success-path">${escapeHtml(targetPath)}</div>
+    </div>
+  `;
+}
+
+function updatePackageSaveButtonState(){
+  const savePackageBtn = document.getElementById("savePackageBtn");
+  if(!savePackageBtn) return;
+  const hasPackage = !!rootNode;
+  const canSave = canSaveCurrentSource();
+  savePackageBtn.style.display = hasPackage ? "inline-block" : "none";
+  savePackageBtn.disabled = hasPackage && !canSave;
+  savePackageBtn.textContent = "保存";
+  savePackageBtn.title = canSave
+    ? "保存回当前导入的主题包或文件夹"
+    : (hasPackage ? "当前导入方式暂不支持直接保存回原位置，请使用“导出”。" : "");
+}
+
 function updateSaveButtonState(){
   const saveBtn = document.getElementById("saveTextBtn");
-  saveBtn.textContent = "保存";
+  saveBtn.textContent = "保存文本";
   saveBtn.classList.toggle("primary", activeEditorDirty);
+  updatePackageSaveButtonState();
 }
 
 function clearEditorTrackingState(){
@@ -154,6 +266,23 @@ function hasPendingPackageChanges(){
   return hasUnsavedTextChanges() || treeHasPendingChanges(rootNode);
 }
 
+function setImportSource(kind=null, sourcePath="", sourceHandle=null, sourceLabel=""){
+  importSourceKind = kind || null;
+  importSourcePath = kind ? String(sourcePath || "") : "";
+  importSourceHandle = kind ? (sourceHandle || null) : null;
+  importSourceLabel = kind ? String(sourceLabel || sourcePath || "") : "";
+  pendingSourceDeletePaths.clear();
+  clearOperationRecords();
+  updatePackageSaveButtonState();
+}
+
+function rememberSourcePathDeletion(path){
+  const normalizedPath = normalizePath(path || "");
+  if(!normalizedPath) return;
+  pendingSourceDeletePaths.add(normalizedPath);
+  updatePackageSaveButtonState();
+}
+
 function clearExportedFlags(node){
   if(!node) return null;
   if(node.deleted) return null;
@@ -177,9 +306,11 @@ function syncSelectionMetaAfterExport(){
 }
 
 function markCurrentPackageAsExported(){
+  pendingSourceDeletePaths.clear();
   clearExportedFlags(rootNode);
   renderTree();
   syncSelectionMetaAfterExport();
+  updatePackageSaveButtonState();
 }
 
 function ensureJsZipAvailable(){
@@ -189,14 +320,68 @@ function ensureJsZipAvailable(){
   return JSZip;
 }
 
-function getTauriSaveApi(){
+function getTauriFileApi(){
   if(typeof window === "undefined") return null;
   const tauri = window.__TAURI__;
   if(!tauri?.dialog?.save || !tauri?.fs?.writeFile) return null;
   return {
+    open: tauri.dialog.open,
     save: tauri.dialog.save,
+    readDir: tauri.fs.readDir,
+    readFile: tauri.fs.readFile,
+    mkdir: tauri.fs.mkdir,
+    remove: tauri.fs.remove,
     writeFile: tauri.fs.writeFile
   };
+}
+
+function getPathLeafName(pathValue){
+  const pathText = String(pathValue || "").replace(/[\\/]+$/, "");
+  if(!pathText) return "";
+  const parts = pathText.split(/[\\/]/);
+  return parts[parts.length - 1] || "";
+}
+
+function joinFsPath(basePath, entryName){
+  return `${String(basePath || "").replace(/[\\/]+$/, "")}/${entryName}`;
+}
+
+function supportsFileSystemAccess(){
+  return typeof window !== "undefined"
+    && typeof window.showOpenFilePicker === "function"
+    && typeof window.showDirectoryPicker === "function";
+}
+
+function isAbortError(err){
+  return err?.name === "AbortError";
+}
+
+async function ensureFileSystemHandlePermission(handle, mode="readwrite"){
+  if(!handle) return false;
+  if(typeof handle.queryPermission === "function"){
+    const permission = await handle.queryPermission({mode});
+    if(permission === "granted") return true;
+  }
+  if(typeof handle.requestPermission === "function"){
+    const permission = await handle.requestPermission({mode});
+    return permission === "granted";
+  }
+  return true;
+}
+
+function getFolderInputRootName(files){
+  const firstPath = files?.[0]?.webkitRelativePath || files?.[0]?.name || "theme-folder";
+  const [rootName] = firstPath.split("/");
+  return rootName || "theme-folder";
+}
+
+function normalizeFolderEntryPath(relativePath, rootName){
+  const normalized = normalizePath(relativePath || "");
+  if(!normalized) return "";
+  const rootPrefix = `${rootName}/`;
+  if(normalized === rootName) return "";
+  if(normalized.startsWith(rootPrefix)) return normalized.slice(rootPrefix.length);
+  return normalized;
 }
 
 function applyTheme(theme){
@@ -352,18 +537,17 @@ async function appConfirmUnsavedTextChanges(){
 
 async function appConfirmOpenNewPackage(){
   const result = await runModal({
-    title: "打开新主题包",
-    description: "打开新的主题包前，建议先导出当前主题包，如果已经导出请忽略提示。",
+    title: "导入新内容",
+    description: "导入新的主题内容前，建议先“保存或导出”当前主题包，如果已经“保存或导出”请忽略提示。",
     showInput: false,
-    okText: "导出当前主题包",
-    cancelText: "打开新主题包",
+    okText: "继续导入",
+    cancelText: "返回",
     showCancel: true,
     okClassName: "primary",
-    cancelActionResult: "open",
+    cancelActionResult: "stay",
     dismissActionResult: "stay"
   });
-  if(result.action === "ok") return "export";
-  if(result.action === "open") return "open";
+  if(result.action === "ok") return "open";
   return "stay";
 }
 
@@ -948,6 +1132,7 @@ function saveCurrentTextChanges(){
   updateSaveButtonState();
   renderTree();
   document.getElementById("currentMeta").textContent = `${bytesToSize(selected.data?.length)} · 已修改`;
+  updatePackageSaveButtonState();
   return true;
 }
 
@@ -1088,17 +1273,21 @@ function updateSidebarContext(){
   const hasPackage = !!rootNode;
   const treeWorkspace = document.getElementById("treeWorkspace");
   const treeEmptyState = document.getElementById("treeEmptyState");
+  const savePackageBtn = document.getElementById("savePackageBtn");
   const exportBtn = document.getElementById("exportBtn");
   const clearBtn = document.getElementById("clearBtn");
   const mainHeader = document.getElementById("mainHeader");
-  const openFileLabel = document.getElementById("openFileLabel");
+  const importBtn = document.getElementById("importBtn");
 
+  savePackageBtn.style.display = hasPackage ? "inline-block" : "none";
   exportBtn.style.display = hasPackage ? "inline-block" : "none";
   clearBtn.style.display = hasPackage ? "inline-block" : "none";
   treeWorkspace.style.display = hasPackage ? "flex" : "none";
   treeEmptyState.style.display = hasPackage ? "none" : "flex";
   mainHeader.style.display = hasPackage ? "flex" : "none";
-  openFileLabel.classList.toggle("primary", !hasPackage);
+  importBtn.classList.toggle("primary", !hasPackage);
+  updatePackageSaveButtonState();
+  updateTreeFooterStatus();
 }
 
 function ensureDir(root, parts){
@@ -1195,7 +1384,7 @@ function renderTree(){
   tree.innerHTML = "";
   visibleNodeOrder = [];
   if(!rootNode){
-    tree.innerHTML = `<div class="small" style="padding:10px">尚未打开主题包文件</div>`;
+    tree.innerHTML = `<div class="small" style="padding:10px">尚未导入主题内容</div>`;
     return;
   }
   const frag = document.createDocumentFragment();
@@ -1527,8 +1716,33 @@ function setOriginalFileName(fileName){
   }
 }
 
-function applyLoadedRootNode(loadedRoot, fileName="theme.itz"){
+function setOriginalFolderName(folderName){
+  originalFullName = folderName || "theme-folder";
+  originalBaseName = originalFullName;
+  originalExt = ".zip";
+}
+
+function applyLoadedRootNode(loadedRoot, fileName="theme.itz", sourcePath="", sourceHandle=null){
   setOriginalFileName(fileName);
+  setImportSource(sourcePath || sourceHandle ? "package" : null, sourcePath, sourceHandle, fileName);
+  multiSelectedPaths.clear();
+  visibleNodeOrder = [];
+  rootNode = loadedRoot;
+  sortTree(rootNode);
+  setExpandedRecursive(rootNode, false);
+  rootNode.expanded = true;
+  selected = rootNode;
+  multiSelectedPaths.add(rootNode.path);
+  lastClickedPath = rootNode.path;
+  hideSelectionActions();
+  updateSidebarContext();
+  renderTree();
+  void openNode(rootNode);
+}
+
+function applyLoadedFolderRootNode(loadedRoot, folderName="theme-folder", sourcePath="", sourceHandle=null){
+  setOriginalFolderName(folderName);
+  setImportSource(sourcePath || sourceHandle ? "folder" : null, sourcePath, sourceHandle, folderName);
   multiSelectedPaths.clear();
   visibleNodeOrder = [];
   rootNode = loadedRoot;
@@ -1575,19 +1789,119 @@ function buildRootNodeFromFixture(entries=[]){
   return root;
 }
 
-async function loadPackageFromArrayBuffer(buffer, fileName="theme.itz"){
+async function loadPackageFromArrayBuffer(buffer, fileName="theme.itz", sourcePath="", sourceHandle=null){
   setOriginalFileName(fileName);
   log("读取主题包中，请稍候...");
   const ZipLib = ensureJsZipAvailable();
   rootZip = await ZipLib.loadAsync(buffer);
   const loadedRoot = await buildTreeFromZip(rootZip);
-  applyLoadedRootNode(loadedRoot, fileName);
+  applyLoadedRootNode(loadedRoot, fileName, sourcePath, sourceHandle);
 }
 
 async function loadFixtureEntries(entries, fileName="theme.itz"){
   rootZip = null;
   const loadedRoot = buildRootNodeFromFixture(entries);
   applyLoadedRootNode(loadedRoot, fileName);
+}
+
+async function loadPackageFromFolderFiles(fileList){
+  const files = Array.from(fileList || []);
+  if(files.length === 0) return;
+  rootZip = null;
+  const folderName = getFolderInputRootName(files);
+  const entries = [];
+  for(const file of files){
+    const relativePath = normalizeFolderEntryPath(file.webkitRelativePath || file.name, folderName);
+    if(!relativePath) continue;
+    entries.push({
+      path: relativePath,
+      bytes: new Uint8Array(await file.arrayBuffer())
+    });
+  }
+  const loadedRoot = buildRootNodeFromFixture(entries);
+  applyLoadedFolderRootNode(loadedRoot, folderName);
+}
+
+async function readFolderEntriesFromPath(folderPath){
+  const tauriApi = getTauriFileApi();
+  if(!tauriApi?.readDir || !tauriApi?.readFile){
+    throw new Error("当前环境暂不支持读取文件夹。");
+  }
+
+  const entries = [];
+
+  async function walkDirectory(currentPath, relativeBase=""){
+    const children = await tauriApi.readDir(currentPath);
+    if(children.length === 0 && relativeBase){
+      entries.push({path: relativeBase, type: "dir"});
+      return;
+    }
+
+    for(const child of children){
+      const childPath = joinFsPath(currentPath, child.name);
+      const childRelativePath = relativeBase ? `${relativeBase}/${child.name}` : child.name;
+      if(child.isDirectory){
+        await walkDirectory(childPath, childRelativePath);
+        continue;
+      }
+      if(child.isFile){
+        entries.push({
+          path: childRelativePath,
+          bytes: await tauriApi.readFile(childPath)
+        });
+      }
+    }
+  }
+
+  await walkDirectory(folderPath);
+  return entries;
+}
+
+async function loadPackageFromFolderPath(folderPath){
+  rootZip = null;
+  const normalizedFolderPath = String(folderPath || "");
+  const folderName = getPathLeafName(normalizedFolderPath) || "theme-folder";
+  const entries = await readFolderEntriesFromPath(normalizedFolderPath);
+  const loadedRoot = buildRootNodeFromFixture(entries);
+  applyLoadedFolderRootNode(loadedRoot, folderName, normalizedFolderPath);
+}
+
+async function readFolderEntriesFromHandle(directoryHandle){
+  const entries = [];
+
+  async function walkDirectory(handle, relativeBase=""){
+    let hasChildren = false;
+    for await (const [entryName, childHandle] of handle.entries()){
+      hasChildren = true;
+      const childRelativePath = relativeBase ? `${relativeBase}/${entryName}` : entryName;
+      if(childHandle.kind === "directory"){
+        await walkDirectory(childHandle, childRelativePath);
+        continue;
+      }
+      if(childHandle.kind === "file"){
+        const file = await childHandle.getFile();
+        entries.push({
+          path: childRelativePath,
+          bytes: new Uint8Array(await file.arrayBuffer())
+        });
+      }
+    }
+
+    if(!hasChildren && relativeBase){
+      entries.push({path: relativeBase, type: "dir"});
+    }
+  }
+
+  await walkDirectory(directoryHandle);
+  return entries;
+}
+
+async function loadPackageFromDirectoryHandle(directoryHandle){
+  rootZip = null;
+  const folderName = directoryHandle?.name || "theme-folder";
+  const entries = await readFolderEntriesFromHandle(directoryHandle);
+  const loadedRoot = buildRootNodeFromFixture(entries);
+  applyLoadedFolderRootNode(loadedRoot, folderName, "", directoryHandle);
 }
 
 function isTestFixtureMode(){
@@ -1615,50 +1929,131 @@ async function maybeLoadDemoFixture(){
   ], "sample.zip");
 }
 
-document.getElementById("openFileLabel").addEventListener("click", async (e)=>{
-  const input = document.getElementById("openFile");
-  if(!rootNode || !hasPendingPackageChanges()){
-    input.value = "";
-    return;
-  }
+function openImportMenu(){
+  document.getElementById("importMenu").hidden = false;
+}
 
-  e.preventDefault();
-  e.stopPropagation();
+function closeImportMenu(){
+  document.getElementById("importMenu").hidden = true;
+}
 
+async function maybeProceedToImport(){
+  if(!rootNode || !hasPendingPackageChanges()) return true;
   const action = await appConfirmOpenNewPackage();
-  if(action === "export"){
-    await exportCurrentPackage();
-    return;
-  }
-  if(action !== "open"){
-    return;
-  }
+  return action === "open";
+}
 
-  allowNextOpenFileDialog = true;
-  input.value = "";
-  input.click();
+async function importPackageFromDesktop(){
+  const tauriApi = getTauriFileApi();
+  if(!tauriApi?.open || !tauriApi?.readFile) return false;
+
+  const selectedPath = await tauriApi.open({
+    title: "导入主题包",
+    filters: [{name: "Theme Package", extensions: ["itz", "mtz", "zip"]}],
+    multiple: false,
+    fileAccessMode: "scoped"
+  });
+  if(!selectedPath || Array.isArray(selectedPath)) return true;
+  await loadPackageFromArrayBuffer(await tauriApi.readFile(selectedPath), getPathLeafName(selectedPath) || "theme.itz", selectedPath);
+  return true;
+}
+
+async function importPackageFromBrowser(){
+  if(!supportsFileSystemAccess() || typeof window.showOpenFilePicker !== "function") return false;
+
+  try{
+    const [fileHandle] = await window.showOpenFilePicker({
+      multiple: false,
+      types: [{
+        description: "Theme Package",
+        accept: {
+          "application/zip": [".itz", ".mtz", ".zip"]
+        }
+      }]
+    });
+    if(!fileHandle) return true;
+    const file = await fileHandle.getFile();
+    await loadPackageFromArrayBuffer(await file.arrayBuffer(), file.name || "theme.itz", "", fileHandle);
+    return true;
+  }catch(err){
+    if(isAbortError(err)) return true;
+    throw err;
+  }
+}
+
+async function importFolderFromDesktop(){
+  const tauriApi = getTauriFileApi();
+  if(!tauriApi?.open || !tauriApi?.readDir || !tauriApi?.readFile) return false;
+
+  const selectedPath = await tauriApi.open({
+    title: "导入文件夹",
+    directory: true,
+    multiple: false,
+    recursive: true,
+    fileAccessMode: "scoped"
+  });
+  if(!selectedPath || Array.isArray(selectedPath)) return true;
+  await loadPackageFromFolderPath(selectedPath);
+  return true;
+}
+
+async function importFolderFromBrowser(){
+  if(!supportsFileSystemAccess() || typeof window.showDirectoryPicker !== "function") return false;
+
+  try{
+    const directoryHandle = await window.showDirectoryPicker({
+      mode: "read"
+    });
+    if(!directoryHandle) return true;
+    await loadPackageFromDirectoryHandle(directoryHandle);
+    return true;
+  }catch(err){
+    if(isAbortError(err)) return true;
+    throw err;
+  }
+}
+
+document.getElementById("importBtn").addEventListener("click", (e)=>{
+  e.stopPropagation();
+  const menu = document.getElementById("importMenu");
+  menu.hidden = !menu.hidden;
 });
 
-document.getElementById("openFile").addEventListener("click", async (e)=>{
-  if(allowNextOpenFileDialog){
-    allowNextOpenFileDialog = false;
-    return;
+document.getElementById("importPackageBtn").addEventListener("click", async ()=>{
+  closeImportMenu();
+  if(!(await maybeProceedToImport())) return;
+  try{
+    if(await importPackageFromDesktop()) return;
+    if(await importPackageFromBrowser()) return;
+    const input = document.getElementById("openFile");
+    input.value = "";
+    input.click();
+  }catch(err){
+    await appAlert("打开失败：这可能不是 ZIP 结构的主题包，或文件已损坏。", {title:"打开失败"});
+    console.error(err);
   }
-  if(!rootNode || !hasPendingPackageChanges()) return;
-  const input = document.getElementById("openFile");
-  e.preventDefault();
-  e.stopPropagation();
-  const action = await appConfirmOpenNewPackage();
-  if(action === "export"){
-    await exportCurrentPackage();
-    return;
+});
+
+document.getElementById("importFolderBtn").addEventListener("click", async ()=>{
+  closeImportMenu();
+  if(!(await maybeProceedToImport())) return;
+  try{
+    if(await importFolderFromDesktop()) return;
+    if(await importFolderFromBrowser()) return;
+    const input = document.getElementById("openFolder");
+    input.value = "";
+    input.click();
+  }catch(err){
+    await appAlert(err?.message || "打开文件夹失败，请重试。", {title:"打开失败"});
+    console.error(err);
   }
-  if(action !== "open"){
-    return;
+});
+
+document.addEventListener("click", (e)=>{
+  const menuWrap = document.querySelector(".toolbar-menu-wrap");
+  if(!menuWrap?.contains(e.target)){
+    closeImportMenu();
   }
-  allowNextOpenFileDialog = true;
-  input.value = "";
-  input.click();
 });
 
 document.getElementById("openFile").addEventListener("change", async (e)=>{
@@ -1669,6 +2064,19 @@ document.getElementById("openFile").addEventListener("change", async (e)=>{
   }catch(err){
     await appAlert("打开失败：这可能不是 ZIP 结构的主题包，或文件已损坏。", {title:"打开失败"});
     console.error(err);
+  }
+});
+
+document.getElementById("openFolder").addEventListener("change", async (e)=>{
+  const files = e.target.files;
+  if(!files?.length) return;
+  try{
+    await loadPackageFromFolderFiles(files);
+  }catch(err){
+    await appAlert(err?.message || "打开文件夹失败，请重试。", {title:"打开失败"});
+    console.error(err);
+  }finally{
+    e.target.value = "";
   }
 });
 
@@ -1727,6 +2135,7 @@ async function deleteSelectedMaterials(){
   hideSelectionActions();
   updateSidebarContext();
   renderTree();
+  showToast(`删除成功，已删除 ${selectedList.length} 个项目`);
 }
 
 document.getElementById("deleteSelectedBtn").addEventListener("click", deleteSelectedMaterials);
@@ -1742,21 +2151,23 @@ function clearCurrentPackage(){
   originalBaseName = "theme";
   originalExt = ".itz";
   originalFullName = "theme.itz";
+  setImportSource();
   clearActiveTextEditor();
 
   document.getElementById("openFile").value = "";
+  document.getElementById("openFolder").value = "";
   document.getElementById("searchInput").value = "";
   document.getElementById("currentPath").textContent = "未打开文件";
-  document.getElementById("currentMeta").textContent = "请选择一个主题包文件开始";
+  document.getElementById("currentMeta").textContent = "请选择一个主题包或文件夹开始";
   hideSelectionActions();
   updateSidebarContext();
   document.getElementById("viewer").innerHTML = `
       <div class="empty">
         <div>
           <b>使用说明</b><br>
-          1. 点击左侧“打开主题包”选择主题包<br>
+          1. 点击左侧“导入”选择主题包或文件夹<br>
           2. 点击文本文件可编辑，图片可预览/替换<br>
-          3. 修改完成后点击“导出主题包”
+          3. 需要覆盖当前来源时点击“保存”，另存新包时点击“导出”
         </div>
       </div>
     `;
@@ -1821,25 +2232,32 @@ document.getElementById("replaceInput").addEventListener("change", async (e)=>{
   selected.data = new Uint8Array(await file.arrayBuffer());
   selected.modified = true;
   selected.zipChild = null;
+  const replacedName = selected.name;
+  updatePackageSaveButtonState();
   renderTree();
   openNode(selected);
   e.target.value = "";
+  showToast(`替换成功：${replacedName}`);
 });
 
 document.getElementById("deleteBtn").addEventListener("click", async ()=>{
   if(!selected || selected === rootNode) return;
   if(!(await appConfirm(`确定删除：${selected.path}？`, {title:"删除确认", okClassName:"danger"}))) return;
+  const deletedPath = selected.path;
   selected.deleted = true;
   multiSelectedPaths.delete(selected.path);
   const parent = selected.parent;
   selected = parent;
+  updatePackageSaveButtonState();
+  updateSidebarContext();
   renderTree();
   openNode(parent);
+  showToast(`删除成功：${deletedPath}`);
 });
 
 document.getElementById("addTextBtn").addEventListener("click", ()=>{
   if(!rootNode){
-    void appAlert("请先打开主题包文件", {title:"无法新增"});
+    void appAlert("请先导入主题内容", {title:"无法新增"});
     return;
   }
   const baseDir = getTargetBaseDir();
@@ -1858,6 +2276,7 @@ document.getElementById("addTextBtn").addEventListener("click", ()=>{
     sortTree(rootNode);
     renderTree();
     openNode(node);
+    showToast(`已新增文本文件：${node.name}`);
   }, {
     description:"路径示例：description.xml、icons/config.json、preview/readme.txt",
     placeholder:"输入文件路径",
@@ -1867,7 +2286,7 @@ document.getElementById("addTextBtn").addEventListener("click", ()=>{
 
 document.getElementById("addFolderBtn").addEventListener("click", ()=>{
   if(!rootNode){
-    void appAlert("请先打开主题包文件", {title:"无法新增"});
+    void appAlert("请先导入主题内容", {title:"无法新增"});
     return;
   }
   const baseDir = getTargetBaseDir();
@@ -1886,6 +2305,7 @@ document.getElementById("addFolderBtn").addEventListener("click", ()=>{
     sortTree(rootNode);
     renderTree();
     openNode(node);
+    showToast(`已新增文件夹：${node.name}`);
   }, {
     description:"路径示例：icons、preview/images、wallpaper/home",
     placeholder:"输入文件夹路径",
@@ -1895,7 +2315,7 @@ document.getElementById("addFolderBtn").addEventListener("click", ()=>{
 
 document.getElementById("addFileInput").addEventListener("change", async (e)=>{
   if(!rootNode){
-    await appAlert("请先打开主题包文件", {title:"无法新增"});
+    await appAlert("请先导入主题内容", {title:"无法新增"});
     return;
   }
   const files = [...e.target.files];
@@ -1935,6 +2355,7 @@ document.getElementById("addFileInput").addEventListener("change", async (e)=>{
   updateSidebarContext();
   renderTree();
   e.target.value = "";
+  showToast(`已新增 ${filePlans.length} 个文件`);
 });
 
 function getExistingNodeAtPath(path){
@@ -1960,11 +2381,13 @@ function createFileAtPath(path, data, options={}){
     if(!overwrite) throw new Error(`文件已存在：${path}`);
     existing.data = data;
     existing.modified = true;
+    updatePackageSaveButtonState();
     return existing;
   }
   const node = new FileNode({name, path, parent:dir, isDir:false, data});
   node.modified = true;
   dir.children.push(node);
+  updatePackageSaveButtonState();
   return node;
 }
 
@@ -1992,6 +2415,7 @@ function createDirAtPath(path, options={}){
   }
 
   if(!created && !allowExisting) throw new Error("该文件夹已存在");
+  if(created) updatePackageSaveButtonState();
   return cur;
 }
 
@@ -2030,6 +2454,7 @@ function renameNode(node, newName){
 
   const oldPath = node.path;
   const newPath = joinNodePath(node.parent?.path || "", trimmed);
+  rememberSourcePathDeletion(oldPath);
   node.name = trimmed;
   node.modified = true;
   if(node.parent) node.parent.modified = true;
@@ -2038,6 +2463,7 @@ function renameNode(node, newName){
   multiSelectedPaths.delete(oldPath);
   multiSelectedPaths.add(node.path);
   if(lastClickedPath === oldPath) lastClickedPath = node.path;
+  updatePackageSaveButtonState();
 
   return node;
 }
@@ -2051,6 +2477,7 @@ document.getElementById("renameBtn").addEventListener("click", ()=>{
     sortTree(rootNode);
     renderTree();
     openNode(target);
+    showToast(`已重命名为 ${target.name}`);
   }, {
     description:`当前路径：${target.path}`,
     placeholder:`输入新的${targetLabel}名称`,
@@ -2111,16 +2538,216 @@ async function zipDirFromNode(dirNode){
   });
 }
 
+function collectDeletedTreePaths(node, list=[]){
+  if(!node?.children) return list;
+  for(const child of node.children){
+    if(child.deleted){
+      list.push({path: child.path, isDir: child.isDir});
+      continue;
+    }
+    collectDeletedTreePaths(child, list);
+  }
+  return list;
+}
+
+async function collectFolderWriteOperations(node, dirs=[], files=[]){
+  if(!node || node.deleted) return {dirs, files};
+
+  if(node !== rootNode){
+    if(node.isDir){
+      if(node.isArchiveContainer){
+        files.push({
+          path: node.path,
+          data: await zipDirFromNode(node)
+        });
+        return {dirs, files};
+      }
+      dirs.push(node.path);
+    }else{
+      files.push({
+        path: node.path,
+        data: node.data
+      });
+    }
+  }
+
+  for(const child of node.children || []){
+    await collectFolderWriteOperations(child, dirs, files);
+  }
+  return {dirs, files};
+}
+
+async function saveCurrentFolderSourceToPath(folderPath){
+  const tauriApi = getTauriFileApi();
+  if(!tauriApi?.mkdir || !tauriApi?.remove || !tauriApi?.writeFile){
+    throw new Error("当前环境暂不支持直接保存回文件夹。");
+  }
+
+  const deletedTreePaths = collectDeletedTreePaths(rootNode).map(item => item.path);
+  const removalPaths = Array.from(new Set([...pendingSourceDeletePaths, ...deletedTreePaths]))
+    .sort((a, b)=> b.length - a.length);
+
+  for(const relativePath of removalPaths){
+    const targetPath = joinFsPath(folderPath, relativePath);
+    try{
+      await tauriApi.remove(targetPath, {recursive: true});
+    }catch(err){
+      const message = String(err?.message || err || "");
+      if(!/not found|does not exist|no such file/i.test(message)){
+        throw err;
+      }
+    }
+  }
+
+  const {dirs, files} = await collectFolderWriteOperations(rootNode);
+  dirs.sort((a, b)=> a.split("/").length - b.split("/").length);
+
+  for(const relativeDirPath of dirs){
+    await tauriApi.mkdir(joinFsPath(folderPath, relativeDirPath), {recursive: true});
+  }
+
+  for(const fileEntry of files){
+    await tauriApi.writeFile(joinFsPath(folderPath, fileEntry.path), fileEntry.data);
+  }
+}
+
+async function getDirectoryHandleForRelativePath(rootHandle, relativeDirPath, create=false){
+  let currentHandle = rootHandle;
+  const segments = normalizePath(relativeDirPath).split("/").filter(Boolean);
+  for(const segment of segments){
+    currentHandle = await currentHandle.getDirectoryHandle(segment, {create});
+  }
+  return currentHandle;
+}
+
+async function removeEntryFromDirectoryHandle(rootHandle, relativePath){
+  const segments = normalizePath(relativePath).split("/").filter(Boolean);
+  if(segments.length === 0) return;
+
+  const entryName = segments.pop();
+  let parentHandle = rootHandle;
+  for(const segment of segments){
+    try{
+      parentHandle = await parentHandle.getDirectoryHandle(segment);
+    }catch(err){
+      if(err?.name === "NotFoundError") return;
+      throw err;
+    }
+  }
+
+  try{
+    await parentHandle.removeEntry(entryName, {recursive: true});
+  }catch(err){
+    if(err?.name === "NotFoundError") return;
+    throw err;
+  }
+}
+
+async function writeFileToDirectoryHandle(rootHandle, relativePath, data){
+  const normalizedPath = normalizePath(relativePath);
+  const parts = normalizedPath.split("/").filter(Boolean);
+  const fileName = parts.pop();
+  const parentHandle = parts.length > 0
+    ? await getDirectoryHandleForRelativePath(rootHandle, parts.join("/"), true)
+    : rootHandle;
+  const fileHandle = await parentHandle.getFileHandle(fileName, {create: true});
+  const writable = await fileHandle.createWritable();
+  await writable.write(data);
+  await writable.close();
+}
+
+async function saveCurrentFolderSourceToHandle(directoryHandle){
+  if(!(await ensureFileSystemHandlePermission(directoryHandle, "readwrite"))){
+    throw new Error("未获得文件夹写入权限，无法保存。");
+  }
+
+  const deletedTreePaths = collectDeletedTreePaths(rootNode).map(item => item.path);
+  const removalPaths = Array.from(new Set([...pendingSourceDeletePaths, ...deletedTreePaths]))
+    .sort((a, b)=> b.length - a.length);
+
+  for(const relativePath of removalPaths){
+    await removeEntryFromDirectoryHandle(directoryHandle, relativePath);
+  }
+
+  const {dirs, files} = await collectFolderWriteOperations(rootNode);
+  dirs.sort((a, b)=> a.split("/").length - b.split("/").length);
+
+  for(const relativeDirPath of dirs){
+    await getDirectoryHandleForRelativePath(directoryHandle, relativeDirPath, true);
+  }
+
+  for(const fileEntry of files){
+    await writeFileToDirectoryHandle(directoryHandle, fileEntry.path, fileEntry.data);
+  }
+}
+
+async function saveCurrentPackageToHandle(fileHandle){
+  if(!(await ensureFileSystemHandlePermission(fileHandle, "readwrite"))){
+    throw new Error("未获得文件写入权限，无法保存。");
+  }
+  const data = await zipDirFromNode(rootNode);
+  const writable = await fileHandle.createWritable();
+  await writable.write(data);
+  await writable.close();
+}
+
+async function saveCurrentSource(){
+  if(!rootNode){
+    await appAlert("请先导入主题内容", {title:"无法保存"});
+    return false;
+  }
+  if(!canSaveCurrentSource()){
+    await appAlert("当前导入来源不支持直接保存回原位置，请继续使用“导出”。", {title:"无法保存"});
+    return false;
+  }
+
+  if(hasUnsavedTextChanges()){
+    saveCurrentTextChanges();
+  }
+
+  document.getElementById("viewer").innerHTML = `<div class="drop">正在保存，请稍候...</div>`;
+
+  try{
+    if(importSourceKind === "package"){
+      if(importSourceHandle){
+        await saveCurrentPackageToHandle(importSourceHandle);
+      }else{
+        const tauriApi = getTauriFileApi();
+        if(!tauriApi?.writeFile) throw new Error("当前环境暂不支持直接保存。");
+        const data = await zipDirFromNode(rootNode);
+        await tauriApi.writeFile(importSourcePath, data);
+      }
+    }else if(importSourceKind === "folder"){
+      if(importSourceHandle){
+        await saveCurrentFolderSourceToHandle(importSourceHandle);
+      }else{
+        await saveCurrentFolderSourceToPath(importSourcePath);
+      }
+    }else{
+      throw new Error("当前导入来源暂不支持直接保存。");
+    }
+
+    markCurrentPackageAsExported();
+    recordOperation("save");
+    renderOperationSuccess("保存完成", getImportSourceLabel());
+    return true;
+  }catch(err){
+    console.error(err);
+    await appAlert(err?.message || "保存失败，请查看控制台错误。", {title:"保存失败"});
+    return false;
+  }
+}
+
 async function exportCurrentPackage(){
   if(!rootNode){
-    await appAlert("请先打开主题包文件", {title:"无法导出"});
+    await appAlert("请先导入主题内容", {title:"无法导出"});
     return false;
   }
   document.getElementById("viewer").innerHTML = `<div class="drop">正在重新打包，请稍候...</div>`;
   try{
     const data = await zipDirFromNode(rootNode);
     const exportName = `${originalBaseName}_modified${originalExt}`;
-    const tauriApi = getTauriSaveApi();
+    const tauriApi = getTauriFileApi();
 
     if(tauriApi){
       const filePath = await tauriApi.save({
@@ -2135,7 +2762,8 @@ async function exportCurrentPackage(){
 
       await tauriApi.writeFile(filePath, data);
       markCurrentPackageAsExported();
-      document.getElementById("viewer").innerHTML = `<div class="drop">导出完成：${escapeHtml(filePath)}</div>`;
+      recordOperation("export");
+      renderOperationSuccess("导出完成", filePath);
       return true;
     }
 
@@ -2152,7 +2780,8 @@ async function exportCurrentPackage(){
 
       const savedLabel = result?.filePath || exportName;
       markCurrentPackageAsExported();
-      document.getElementById("viewer").innerHTML = `<div class="drop">导出完成：${escapeHtml(savedLabel)}</div>`;
+      recordOperation("export");
+      renderOperationSuccess("导出完成", savedLabel);
       return true;
     }
 
@@ -2164,7 +2793,8 @@ async function exportCurrentPackage(){
     a.click();
     setTimeout(()=> URL.revokeObjectURL(url), 1000);
     markCurrentPackageAsExported();
-    document.getElementById("viewer").innerHTML = `<div class="drop">导出完成：${escapeHtml(a.download)}</div>`;
+    recordOperation("export");
+    renderOperationSuccess("导出完成", a.download);
     return true;
   }catch(err){
     console.error(err);
@@ -2175,6 +2805,10 @@ async function exportCurrentPackage(){
 
 document.getElementById("exportBtn").addEventListener("click", async ()=>{
   await exportCurrentPackage();
+});
+
+document.getElementById("savePackageBtn").addEventListener("click", async ()=>{
+  await saveCurrentSource();
 });
 
 document.getElementById("themeToggle").addEventListener("click", toggleTheme);
