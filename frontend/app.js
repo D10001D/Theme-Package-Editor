@@ -35,6 +35,7 @@ let pendingSourceDeletePaths = new Set();
 let latestSaveRecord = "";
 let latestExportRecord = "";
 let toastHideTimer = null;
+let pendingAddFileBaseDir = null;
 
 class FileNode {
   constructor({name, path, parent=null, isDir=false, data=null, zipChild=null, sourceZipPath=null}) {
@@ -1252,6 +1253,24 @@ function getTargetBaseDir(){
   return selected.parent?.path || "";
 }
 
+function getSingleSelectedTreeNode(){
+  if(!rootNode) return null;
+  if(multiSelectedPaths.size === 1){
+    const [path] = Array.from(multiSelectedPaths);
+    const node = findNodeByPath(rootNode, path);
+    if(node && !node.deleted) return node;
+  }
+  if(selected && !selected.deleted) return selected;
+  return rootNode;
+}
+
+function getAddFileTargetBaseDir(){
+  const targetNode = getSingleSelectedTreeNode();
+  if(!targetNode) return "";
+  if(targetNode.isDir) return targetNode.path;
+  return targetNode.parent?.path || "";
+}
+
 function getVisibleChildCount(node){
   if(!node?.children) return 0;
   return node.children.filter(child => !child.deleted).length;
@@ -1292,7 +1311,7 @@ function updateSidebarContext(){
 
 function ensureDir(root, parts){
   let cur = root;
-  let currentPath = "";
+  let currentPath = root?.path || "";
   for(const part of parts){
     if(!part) continue;
     currentPath = currentPath ? `${currentPath}/${part}` : part;
@@ -1415,9 +1434,18 @@ function renderNode(node, depth, parentEl, q){
   twisty.title = node.isDir ? (node.expanded ? "收起" : "展开") : "";
 
   if(node.isDir){
-    twisty.onclick = (ev)=>{
+    twisty.onclick = async (ev)=>{
       ev.stopPropagation();
+      if(shouldConfirmBeforeSelectionChange(node, ev)){
+        const shouldContinue = await confirmLeaveWithUnsavedChanges();
+        if(!shouldContinue) return;
+      }
       node.expanded = !node.expanded;
+      multiSelectedPaths.clear();
+      multiSelectedPaths.add(node.path);
+      lastClickedPath = node.path;
+      selected = node;
+      refreshRightPanelAfterSelection(node);
       renderTree();
     };
   }
@@ -1949,7 +1977,7 @@ async function importPackageFromDesktop(){
 
   const selectedPath = await tauriApi.open({
     title: "导入主题包",
-    filters: [{name: "Theme Package", extensions: ["itz", "mtz", "zip"]}],
+    filters: [{name: "Theme Package", extensions: ["itz", "mtz", "zip", "theme"]}],
     multiple: false,
     fileAccessMode: "scoped"
   });
@@ -1967,7 +1995,7 @@ async function importPackageFromBrowser(){
       types: [{
         description: "Theme Package",
         accept: {
-          "application/zip": [".itz", ".mtz", ".zip"]
+          "application/zip": [".itz", ".mtz", ".zip", ".theme"]
         }
       }]
     });
@@ -2313,13 +2341,23 @@ document.getElementById("addFolderBtn").addEventListener("click", ()=>{
   });
 });
 
+function cacheAddFileTargetBaseDir(){
+  pendingAddFileBaseDir = rootNode ? getAddFileTargetBaseDir() : null;
+}
+
+document.getElementById("addFileLabel").addEventListener("pointerdown", cacheAddFileTargetBaseDir);
+document.getElementById("addFileLabel").addEventListener("click", cacheAddFileTargetBaseDir);
+
 document.getElementById("addFileInput").addEventListener("change", async (e)=>{
   if(!rootNode){
     await appAlert("请先导入主题内容", {title:"无法新增"});
+    e.target.value = "";
+    pendingAddFileBaseDir = null;
     return;
   }
   const files = [...e.target.files];
-  const baseDir = getTargetBaseDir();
+  const baseDir = pendingAddFileBaseDir ?? getAddFileTargetBaseDir();
+  pendingAddFileBaseDir = null;
   const filePlans = files.map(file => ({
     file,
     path: normalizePath(baseDir ? `${baseDir}/${file.name}` : file.name)
