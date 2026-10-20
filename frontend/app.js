@@ -1315,7 +1315,10 @@ function ensureDir(root, parts){
   for(const part of parts){
     if(!part) continue;
     currentPath = currentPath ? `${currentPath}/${part}` : part;
-    let child = cur.children.find(c => c.name === part && c.isDir);
+    let child = cur.children.find(c => c.name === part && !c.deleted);
+    if(child && !child.isDir){
+      throw new Error(`路径冲突：${currentPath} 是文件，无法写入子目录`);
+    }
     if(!child){
       child = new FileNode({name:part, path:currentPath, parent:cur, isDir:true});
       cur.children.push(child);
@@ -1850,6 +1853,10 @@ async function loadPackageFromFolderFiles(fileList){
   applyLoadedFolderRootNode(loadedRoot, folderName);
 }
 
+function isSystemMetadataEntry(name){
+  return name === ".DS_Store" || name === "__MACOSX" || name.startsWith("._");
+}
+
 async function readFolderEntriesFromPath(folderPath){
   const tauriApi = getTauriFileApi();
   if(!tauriApi?.readDir || !tauriApi?.readFile){
@@ -1859,10 +1866,9 @@ async function readFolderEntriesFromPath(folderPath){
   const entries = [];
 
   async function walkDirectory(currentPath, relativeBase=""){
-    const children = await tauriApi.readDir(currentPath);
-    if(children.length === 0 && relativeBase){
+    const children = (await tauriApi.readDir(currentPath)).filter(child => !isSystemMetadataEntry(child.name));
+    if(relativeBase){
       entries.push({path: relativeBase, type: "dir"});
-      return;
     }
 
     for(const child of children){
@@ -1900,6 +1906,7 @@ async function readFolderEntriesFromHandle(directoryHandle){
   async function walkDirectory(handle, relativeBase=""){
     let hasChildren = false;
     for await (const [entryName, childHandle] of handle.entries()){
+      if(isSystemMetadataEntry(entryName)) continue;
       hasChildren = true;
       const childRelativePath = relativeBase ? `${relativeBase}/${entryName}` : entryName;
       if(childHandle.kind === "directory"){
@@ -2111,7 +2118,7 @@ document.getElementById("openFolder").addEventListener("change", async (e)=>{
 
 
 function findNodeByPath(node, path){
-  if(!node) return null;
+  if(!node || node.deleted) return null;
   if(node.path === path) return node;
   if(node.children){
     for(const child of node.children){
@@ -2347,6 +2354,88 @@ function cacheAddFileTargetBaseDir(){
 
 document.getElementById("addFileLabel").addEventListener("pointerdown", cacheAddFileTargetBaseDir);
 document.getElementById("addFileLabel").addEventListener("click", cacheAddFileTargetBaseDir);
+
+let addItemsBusy = false;
+
+document.getElementById("addFileLabel").addEventListener("click", async (event)=>{
+  if(!window.__TAURI__?.core?.invoke) return;
+  event.preventDefault();
+  if(addItemsBusy || !rootNode) return;
+  const targetRoot = rootNode;
+  const baseDir = pendingAddFileBaseDir ?? getAddFileTargetBaseDir();
+  pendingAddFileBaseDir = null;
+  addItemsBusy = true;
+  try{
+    const items = await window.__TAURI__.core.invoke("pick_add_items");
+    if(!items.length || rootNode !== targetRoot) return;
+    const entries = [];
+    const api = getTauriFileApi();
+    for(const [sourcePath, isDir] of items){
+      const path = joinNodePath(baseDir, getPathLeafName(sourcePath));
+      if(isDir){
+        entries.push({path, type:"dir"});
+        for(const entry of await readFolderEntriesFromPath(sourcePath)){
+          entries.push({...entry, path:joinNodePath(path, entry.path)});
+        }
+      }else{
+        entries.push({path, bytes:await api.readFile(sourcePath)});
+      }
+    }
+    if(rootNode !== targetRoot) return;
+    await addPickedEntries(entries, targetRoot);
+  }catch(error){
+    await appAlert(String(error?.message || error), {title:"新增失败"});
+  }finally{
+    addItemsBusy = false;
+  }
+});
+
+async function addPickedEntries(entries, targetRoot){
+  const files = new Map();
+  const dirs = new Set();
+  for(const entry of entries){
+    const path = normalizePath(entry.path);
+    const parts = path.split("/");
+    parts.pop();
+    while(parts.length){
+      dirs.add(parts.join("/"));
+      parts.pop();
+    }
+    if(entry.type === "dir") dirs.add(path);
+    else {
+      if(files.has(path)) throw new Error(`所选项目包含重复文件：${path}`);
+      files.set(path, entry.bytes);
+    }
+  }
+  for(const path of dirs){
+    const existing = getExistingNodeAtPath(path);
+    if(files.has(path) || (existing && !existing.isDir)){
+      throw new Error(`路径冲突：${path} 已是文件，无法添加同名文件夹`);
+    }
+  }
+  const overwrites = [];
+  for(const path of files.keys()){
+    const existing = getExistingNodeAtPath(path);
+    if(existing?.isDir) throw new Error(`路径冲突：${path} 已是文件夹，无法添加同名文件`);
+    if(existing) overwrites.push(path);
+  }
+  if(overwrites.length){
+    const preview = overwrites.slice(0, 6).join("\n");
+    const extra = overwrites.length > 6 ? `\n... 以及另外 ${overwrites.length - 6} 项` : "";
+    if(!(await appConfirm(`以下文件已存在，是否覆盖？\n\n${preview}${extra}`, {title:"覆盖确认"}))) return;
+  }
+  if(rootNode !== targetRoot) return;
+  for(const path of [...dirs].sort((a,b)=>a.split("/").length-b.split("/").length)){
+    const dir = createDirAtPath(path, {allowExisting:true});
+    dir.expanded = true;
+  }
+  for(const [path, bytes] of files) createFileAtPath(path, bytes, {overwrite:true});
+  sortTree(rootNode);
+  updateSidebarContext();
+  renderTree();
+  if(selected?.isDir) openNode(selected);
+  showToast(`已添加 ${files.size} 个文件${dirs.size ? "（含文件夹结构）" : ""}`);
+}
 
 document.getElementById("addFileInput").addEventListener("change", async (e)=>{
   if(!rootNode){
