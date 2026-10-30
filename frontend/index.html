@@ -17,17 +17,17 @@
         <img class="brand-logo" src="./logo.svg" alt="Theme Package Editor logo" />
         <div class="title">Theme Package<br />Editor</div>
       </div>
-      <div class="subtitle">主题包编辑工具：支持 .itz / .mtz / .zip / .theme 等主题包，也支持文件夹导入与编辑。</div>
+      <div class="subtitle">主题包编辑工具：支持 .itz / .mtz / .zip / .theme、无后缀 ZIP 压缩文件及文件夹。</div>
       <div class="author-line">作者：0001D ｜ 微信LJ_0001D，小红书0001Design</div>
     </div>
     <div class="toolbar">
       <div class="toolbar-menu-wrap">
         <button id="importBtn" class="primary" type="button">导入</button>
         <div id="importMenu" class="import-menu" hidden>
-          <button id="importPackageBtn" type="button">导入主题包</button>
+          <button id="importFileBtn" type="button">导入文件</button>
           <button id="importFolderBtn" type="button">导入文件夹</button>
         </div>
-        <input id="openFile" type="file" accept=".itz,.mtz,.zip,.theme" />
+        <input id="openFile" type="file" />
         <input id="openFolder" type="file" webkitdirectory directory multiple />
       </div>
       <button id="clearBtn" style="display:none">清空</button>
@@ -66,6 +66,7 @@
         <div id="currentMeta" class="meta">请选择一个主题包或文件夹开始</div>
       </div>
       <div class="actions">
+        <button id="saveSelectedBtn" style="display:none" title="将当前选中的文件或文件夹另存到电脑">保存所选</button>
         <button id="deleteSelectedBtn" class="danger" style="display:none">删除所选</button>
         <button id="formatTextBtn" style="display:none">格式化对齐</button>
         <button id="saveTextBtn" style="display:none">保存文本</button>
@@ -73,10 +74,12 @@
           替换文件
           <input id="replaceInput" type="file" />
         </label>
-        <button id="addTextBtn" style="display:none">新增文本</button>
-        <button id="addFolderBtn" style="display:none">新增文件夹</button>
-        <label id="addFileLabel" class="filebtn" style="display:none">
-          新增文件
+        <button id="addTextBtn" style="display:none" title="在当前目录创建 XML、JSON、TXT 等空白文本文件">新建文件</button>
+        <button id="addFolderBtn" style="display:none">新建文件夹</button>
+        <button id="addFolderImportBtn" style="display:none" title="将电脑上的整个文件夹导入当前选中的目录">导入文件夹</button>
+        <input id="addFolderInput" type="file" webkitdirectory directory multiple />
+        <label id="addFileLabel" class="filebtn" style="display:none" title="将电脑上已有的文件导入当前目录">
+          导入文件
           <input id="addFileInput" type="file" multiple />
         </label>
         <button id="renameBtn" style="display:none">重命名</button>
@@ -89,7 +92,7 @@
         <div>
 		 <div class="name">Theme Package Editor</div>
           <b>使用说明</b><br>
-          1. 点击左侧“导入”选择主题包或文件夹<br>
+          1. 点击左侧“导入”，选择“导入文件”（主题包、无后缀 ZIP）或“导入文件夹”<br>
           2. 点击文本文件可编辑，图片可预览/替换<br>
           3. 需要覆盖当前来源时点击“保存”，另存新包时点击“导出”
         </div>
@@ -99,8 +102,8 @@
 
   <div id="modalMask" class="modal-mask">
     <div class="modal">
-      <h3 id="modalTitle">新增文本文件</h3>
-      <div id="modalDesc" class="small">路径示例：description.xml、icons/config.json、preview/readme.txt</div>
+      <h3 id="modalTitle">新建文件</h3>
+      <div id="modalDesc" class="small">创建空白文本文件，请填写文件名及后缀，如 description.xml、icons/config.json、preview/readme.txt。</div>
       <input id="modalPath" placeholder="输入文件路径" />
       <div class="row">
         <button id="modalCancel">取消</button>

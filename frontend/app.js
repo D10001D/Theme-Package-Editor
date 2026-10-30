@@ -36,6 +36,8 @@ let latestSaveRecord = "";
 let latestExportRecord = "";
 let toastHideTimer = null;
 let pendingAddFileBaseDir = null;
+let pendingFolderImport = null;
+let savingSelectedNode = false;
 
 class FileNode {
   constructor({name, path, parent=null, isDir=false, data=null, zipChild=null, sourceZipPath=null}) {
@@ -331,6 +333,7 @@ function getTauriFileApi(){
     readDir: tauri.fs.readDir,
     readFile: tauri.fs.readFile,
     mkdir: tauri.fs.mkdir,
+    exists: tauri.fs.exists,
     remove: tauri.fs.remove,
     writeFile: tauri.fs.writeFile
   };
@@ -554,7 +557,8 @@ async function appConfirmOpenNewPackage(){
 
 async function isZipData(uint8){
   if(!uint8 || uint8.length < 4) return false;
-  return uint8[0]===ZIP_MAGIC[0] && uint8[1]===ZIP_MAGIC[1] && uint8[2]===ZIP_MAGIC[2] && uint8[3]===ZIP_MAGIC[3];
+  return uint8[0]===ZIP_MAGIC[0] && uint8[1]===ZIP_MAGIC[1]
+    && ((uint8[2]===0x03 && uint8[3]===0x04) || (uint8[2]===0x05 && uint8[3]===0x06));
 }
 
 function normalizePath(p){ return p.replace(/^\/+/, "").replace(/\/+/g, "/"); }
@@ -1277,12 +1281,14 @@ function getVisibleChildCount(node){
 }
 
 function hideSelectionActions(){
+  document.getElementById("saveSelectedBtn").style.display = "none";
   document.getElementById("deleteSelectedBtn").style.display = "none";
   document.getElementById("formatTextBtn").style.display = "none";
   document.getElementById("saveTextBtn").style.display = "none";
   document.getElementById("replaceLabel").style.display = "none";
   document.getElementById("addTextBtn").style.display = "none";
   document.getElementById("addFolderBtn").style.display = "none";
+  document.getElementById("addFolderImportBtn").style.display = "none";
   document.getElementById("addFileLabel").style.display = "none";
   document.getElementById("renameBtn").style.display = "none";
   document.getElementById("deleteBtn").style.display = "none";
@@ -1328,6 +1334,26 @@ function ensureDir(root, parts){
   return cur;
 }
 
+async function expandArchiveFileNode(fileNode, depth=0){
+  if(!(await isZipData(fileNode.data))) return fileNode;
+  try{
+    const ZipLib = ensureJsZipAvailable();
+    const zip = await ZipLib.loadAsync(fileNode.data);
+    const container = new FileNode({
+      name:fileNode.name, path:fileNode.path, parent:fileNode.parent,
+      isDir:true, sourceZipPath:fileNode.path
+    });
+    container.isArchiveContainer = true;
+    container.archiveFileNode = fileNode;
+    await buildTreeFromZip(zip, fileNode.path, container, fileNode.path, depth+1);
+    fileNode.zipChild = container;
+    return container;
+  }catch(err){
+    // Unsupported or damaged archives remain intact as ordinary binary files.
+    return fileNode;
+  }
+}
+
 async function buildTreeFromZip(zip, containerPath="", parentNode=null, sourceZipPath=null, depth=0){
   const root = parentNode || new FileNode({name:"root", path:"", isDir:true});
   const entries = Object.keys(zip.files).sort();
@@ -1357,25 +1383,7 @@ async function buildTreeFromZip(zip, containerPath="", parentNode=null, sourceZi
       sourceZipPath
     });
 
-    if(await isZipData(data)){
-      try{
-        const childZip = await JSZip.loadAsync(data);
-        fileNode.zipChild = new FileNode({
-          name:fileName,
-          path:fullPath,
-          parent:dirNode,
-          isDir:true,
-          sourceZipPath:fullPath
-        });
-        fileNode.zipChild.isArchiveContainer = true;
-        fileNode.zipChild.archiveFileNode = fileNode;
-        await buildTreeFromZip(childZip, fullPath, fileNode.zipChild, fullPath, depth+1);
-      }catch(e){
-        // keep as normal binary if zip parsing fails
-      }
-    }
-
-    dirNode.children.push(fileNode.zipChild || fileNode);
+    dirNode.children.push(await expandArchiveFileNode(fileNode, depth));
   }
 
   return root;
@@ -1659,8 +1667,10 @@ async function openNode(node){
 
   hideSelectionActions();
   document.getElementById("replaceLabel").style.display = node.isDir ? "none" : "";
+  document.getElementById("saveSelectedBtn").style.display = "";
   document.getElementById("addTextBtn").style.display = node.isDir ? "inline-block" : "none";
   document.getElementById("addFolderBtn").style.display = node.isDir ? "inline-block" : "none";
+  document.getElementById("addFolderImportBtn").style.display = node.isDir ? "inline-block" : "none";
   document.getElementById("addFileLabel").style.display = node.isDir ? "inline-flex" : "none";
   document.getElementById("renameBtn").style.display = node === rootNode ? "none" : "";
   document.getElementById("deleteBtn").style.display = node === rootNode ? "none" : "";
@@ -1821,11 +1831,11 @@ function buildRootNodeFromFixture(entries=[]){
 }
 
 async function loadPackageFromArrayBuffer(buffer, fileName="theme.itz", sourcePath="", sourceHandle=null){
-  setOriginalFileName(fileName);
-  log("读取主题包中，请稍候...");
   const ZipLib = ensureJsZipAvailable();
-  rootZip = await ZipLib.loadAsync(buffer);
-  const loadedRoot = await buildTreeFromZip(rootZip);
+  // Validate the entire import before replacing the current project or editor.
+  const loadedZip = await ZipLib.loadAsync(buffer);
+  const loadedRoot = await buildTreeFromZip(loadedZip);
+  rootZip = loadedZip;
   applyLoadedRootNode(loadedRoot, fileName, sourcePath, sourceHandle);
 }
 
@@ -1978,13 +1988,12 @@ async function maybeProceedToImport(){
   return action === "open";
 }
 
-async function importPackageFromDesktop(){
+async function importFileFromDesktop(){
   const tauriApi = getTauriFileApi();
   if(!tauriApi?.open || !tauriApi?.readFile) return false;
 
   const selectedPath = await tauriApi.open({
-    title: "导入主题包",
-    filters: [{name: "Theme Package", extensions: ["itz", "mtz", "zip", "theme"]}],
+    title: "导入文件（主题包或 ZIP 压缩文件，支持无后缀）",
     multiple: false,
     fileAccessMode: "scoped"
   });
@@ -1993,18 +2002,12 @@ async function importPackageFromDesktop(){
   return true;
 }
 
-async function importPackageFromBrowser(){
-  if(!supportsFileSystemAccess() || typeof window.showOpenFilePicker !== "function") return false;
+async function importFileFromBrowser(){
+  if(typeof window.showOpenFilePicker !== "function") return false;
 
   try{
     const [fileHandle] = await window.showOpenFilePicker({
-      multiple: false,
-      types: [{
-        description: "Theme Package",
-        accept: {
-          "application/zip": [".itz", ".mtz", ".zip", ".theme"]
-        }
-      }]
+      multiple: false
     });
     if(!fileHandle) return true;
     const file = await fileHandle.getFile();
@@ -2054,17 +2057,17 @@ document.getElementById("importBtn").addEventListener("click", (e)=>{
   menu.hidden = !menu.hidden;
 });
 
-document.getElementById("importPackageBtn").addEventListener("click", async ()=>{
+document.getElementById("importFileBtn").addEventListener("click", async ()=>{
   closeImportMenu();
   if(!(await maybeProceedToImport())) return;
   try{
-    if(await importPackageFromDesktop()) return;
-    if(await importPackageFromBrowser()) return;
+    if(await importFileFromDesktop()) return;
+    if(await importFileFromBrowser()) return;
     const input = document.getElementById("openFile");
     input.value = "";
     input.click();
   }catch(err){
-    await appAlert("打开失败：这可能不是 ZIP 结构的主题包，或文件已损坏。", {title:"打开失败"});
+    await appAlert("导入失败：请选择 ZIP 结构的主题包或压缩文件（支持无后缀）。文件可能已损坏、已加密或格式不受支持。", {title:"导入文件失败"});
     console.error(err);
   }
 });
@@ -2097,8 +2100,10 @@ document.getElementById("openFile").addEventListener("change", async (e)=>{
   try{
     await loadPackageFromArrayBuffer(await file.arrayBuffer(), file.name || "theme.itz");
   }catch(err){
-    await appAlert("打开失败：这可能不是 ZIP 结构的主题包，或文件已损坏。", {title:"打开失败"});
+    await appAlert("导入失败：请选择 ZIP 结构的主题包或压缩文件（支持无后缀）。文件可能已损坏、已加密或格式不受支持。", {title:"导入文件失败"});
     console.error(err);
+  }finally{
+    e.target.value = "";
   }
 });
 
@@ -2200,7 +2205,7 @@ function clearCurrentPackage(){
       <div class="empty">
         <div>
           <b>使用说明</b><br>
-          1. 点击左侧“导入”选择主题包或文件夹<br>
+          1. 点击左侧“导入”，选择“导入文件”（主题包、无后缀 ZIP）或“导入文件夹”<br>
           2. 点击文本文件可编辑，图片可预览/替换<br>
           3. 需要覆盖当前来源时点击“保存”，另存新包时点击“导出”
         </div>
@@ -2292,16 +2297,16 @@ document.getElementById("deleteBtn").addEventListener("click", async ()=>{
 
 document.getElementById("addTextBtn").addEventListener("click", ()=>{
   if(!rootNode){
-    void appAlert("请先导入主题内容", {title:"无法新增"});
+    void appAlert("请先导入主题内容", {title:"无法新建"});
     return;
   }
   const baseDir = getTargetBaseDir();
   const initialPath = baseDir ? `${baseDir}/` : "";
-  showModal("新增文本文件", async (path)=>{
+  showModal("新建文件", async (path)=>{
     const normalizedPath = normalizePath(path);
     const existing = getExistingNodeAtPath(normalizedPath);
     if(existing){
-      if(existing.isDir) throw new Error(`路径冲突：${normalizedPath} 已是文件夹，无法新增文本文件`);
+      if(existing.isDir) throw new Error(`路径冲突：${normalizedPath} 已是文件夹，无法新建同名文件`);
       if(!(await appConfirm(`文件已存在，是否覆盖？\n\n${normalizedPath}`, {title:"覆盖确认"}))) return;
     }
     const node = createFileAtPath(normalizedPath, new TextEncoder().encode(""), {overwrite:true});
@@ -2311,9 +2316,9 @@ document.getElementById("addTextBtn").addEventListener("click", ()=>{
     sortTree(rootNode);
     renderTree();
     openNode(node);
-    showToast(`已新增文本文件：${node.name}`);
+    showToast(`已新建文件：${node.name}`);
   }, {
-    description:"路径示例：description.xml、icons/config.json、preview/readme.txt",
+    description:"创建空白文本文件，请填写文件名及后缀，如 description.xml、icons/config.json、preview/readme.txt。",
     placeholder:"输入文件路径",
     value:initialPath
   });
@@ -2326,7 +2331,7 @@ document.getElementById("addFolderBtn").addEventListener("click", ()=>{
   }
   const baseDir = getTargetBaseDir();
   const initialPath = baseDir ? `${baseDir}/` : "";
-  showModal("新增文件夹", async (path)=>{
+  showModal("新建文件夹", async (path)=>{
     const normalizedPath = normalizePath(path);
     const existing = getExistingNodeAtPath(normalizedPath);
     if(existing){
@@ -2340,13 +2345,92 @@ document.getElementById("addFolderBtn").addEventListener("click", ()=>{
     sortTree(rootNode);
     renderTree();
     openNode(node);
-    showToast(`已新增文件夹：${node.name}`);
+    showToast(`已新建文件夹：${node.name}`);
   }, {
     description:"路径示例：icons、preview/images、wallpaper/home",
     placeholder:"输入文件夹路径",
     value:initialPath
   });
 });
+
+async function addFolderEntriesToCurrent(folderName, entries, baseDir, targetRoot){
+  if(rootNode !== targetRoot) return;
+  if(!folderName || folderName === "." || folderName === ".." || /[\\/\0]/.test(folderName)){
+    throw new Error("无法识别所选文件夹名称。");
+  }
+  const folderPath = joinNodePath(baseDir, folderName);
+  if(getExistingNodeAtPath(folderPath)?.isArchiveContainer){
+    throw new Error(`路径冲突：${folderPath} 已是压缩文件，无法导入同名文件夹`);
+  }
+  await addPickedEntries([
+    {path:folderPath, type:"dir"},
+    ...entries.map(entry => ({...entry, path:joinNodePath(folderPath, entry.path)}))
+  ], targetRoot);
+}
+
+async function importFolderIntoCurrent(){
+  if(!rootNode || addItemsBusy) return;
+  const targetRoot = rootNode;
+  const baseDir = getAddFileTargetBaseDir();
+  const button = document.getElementById("addFolderImportBtn");
+  const api = getTauriFileApi();
+  addItemsBusy = true;
+  button.disabled = true;
+  try{
+    if(api?.open){
+      const folderPath = await api.open({
+        title:"选择要导入当前目录的文件夹",
+        directory:true, multiple:false, recursive:true, fileAccessMode:"scoped"
+      });
+      if(!folderPath || Array.isArray(folderPath) || rootNode !== targetRoot) return;
+      const entries = await readFolderEntriesFromPath(folderPath);
+      await addFolderEntriesToCurrent(getPathLeafName(folderPath), entries, baseDir, targetRoot);
+    }else if(typeof window.showDirectoryPicker === "function"){
+      const handle = await window.showDirectoryPicker({mode:"read"});
+      if(rootNode !== targetRoot) return;
+      const entries = await readFolderEntriesFromHandle(handle);
+      await addFolderEntriesToCurrent(handle.name, entries, baseDir, targetRoot);
+    }else{
+      pendingFolderImport = {targetRoot, baseDir};
+      const input = document.getElementById("addFolderInput");
+      input.value = "";
+      input.click();
+    }
+  }catch(err){
+    if(!isAbortError(err)) await appAlert(String(err?.message || err), {title:"导入文件夹失败"});
+  }finally{
+    addItemsBusy = false;
+    button.disabled = false;
+  }
+}
+
+async function handleAddFolderInput(event){
+  const pending = pendingFolderImport;
+  pendingFolderImport = null;
+  const input = event.target;
+  const files = Array.from(input.files || []);
+  input.value = "";
+  if(!pending || !files.length || rootNode !== pending.targetRoot || addItemsBusy) return;
+  addItemsBusy = true;
+  try{
+    const folderName = getFolderInputRootName(files);
+    const entries = [];
+    for(const file of files){
+      const path = normalizeFolderEntryPath(file.webkitRelativePath || file.name, folderName);
+      if(!path || path.split("/").some(isSystemMetadataEntry)) continue;
+      entries.push({path, bytes:new Uint8Array(await file.arrayBuffer())});
+    }
+    await addFolderEntriesToCurrent(folderName, entries, pending.baseDir, pending.targetRoot);
+  }catch(err){
+    await appAlert(String(err?.message || err), {title:"导入文件夹失败"});
+  }finally{
+    addItemsBusy = false;
+  }
+}
+
+document.getElementById("addFolderImportBtn").addEventListener("click", importFolderIntoCurrent);
+document.getElementById("addFolderInput").addEventListener("change", handleAddFolderInput);
+document.getElementById("addFolderInput").addEventListener("cancel", ()=>{ pendingFolderImport = null; });
 
 function cacheAddFileTargetBaseDir(){
   pendingAddFileBaseDir = rootNode ? getAddFileTargetBaseDir() : null;
@@ -2384,7 +2468,7 @@ document.getElementById("addFileLabel").addEventListener("click", async (event)=
     if(rootNode !== targetRoot) return;
     await addPickedEntries(entries, targetRoot);
   }catch(error){
-    await appAlert(String(error?.message || error), {title:"新增失败"});
+    await appAlert(String(error?.message || error), {title:"导入文件失败"});
   }finally{
     addItemsBusy = false;
   }
@@ -2416,7 +2500,7 @@ async function addPickedEntries(entries, targetRoot){
   const overwrites = [];
   for(const path of files.keys()){
     const existing = getExistingNodeAtPath(path);
-    if(existing?.isDir) throw new Error(`路径冲突：${path} 已是文件夹，无法添加同名文件`);
+    if(existing?.isDir && !existing.isArchiveContainer) throw new Error(`路径冲突：${path} 已是文件夹，无法添加同名文件`);
     if(existing) overwrites.push(path);
   }
   if(overwrites.length){
@@ -2425,64 +2509,53 @@ async function addPickedEntries(entries, targetRoot){
     if(!(await appConfirm(`以下文件已存在，是否覆盖？\n\n${preview}${extra}`, {title:"覆盖确认"}))) return;
   }
   if(rootNode !== targetRoot) return;
+  const preparedFiles = [];
+  for(const [path, bytes] of files) preparedFiles.push(await prepareAddedFileNode(path, bytes));
+  if(rootNode !== targetRoot) return;
   for(const path of [...dirs].sort((a,b)=>a.split("/").length-b.split("/").length)){
     const dir = createDirAtPath(path, {allowExisting:true});
     dir.expanded = true;
   }
-  for(const [path, bytes] of files) createFileAtPath(path, bytes, {overwrite:true});
+  for(const node of preparedFiles) installAddedFileNode(node);
+  if(selected) selected = findNodeByPath(rootNode, selected.path) || rootNode;
   sortTree(rootNode);
   updateSidebarContext();
   renderTree();
   if(selected?.isDir) openNode(selected);
-  showToast(`已添加 ${files.size} 个文件${dirs.size ? "（含文件夹结构）" : ""}`);
+  showToast(`已导入 ${files.size} 个文件${dirs.size ? "（含文件夹结构）" : ""}`);
 }
 
 document.getElementById("addFileInput").addEventListener("change", async (e)=>{
   if(!rootNode){
-    await appAlert("请先导入主题内容", {title:"无法新增"});
+    await appAlert("请先导入主题内容", {title:"无法导入文件"});
     e.target.value = "";
     pendingAddFileBaseDir = null;
     return;
   }
+  if(addItemsBusy){
+    e.target.value = "";
+    return;
+  }
+  const targetRoot = rootNode;
   const files = [...e.target.files];
   const baseDir = pendingAddFileBaseDir ?? getAddFileTargetBaseDir();
   pendingAddFileBaseDir = null;
-  const filePlans = files.map(file => ({
-    file,
-    path: normalizePath(baseDir ? `${baseDir}/${file.name}` : file.name)
-  }));
-  const overwritePaths = [];
-
-  for(const plan of filePlans){
-    const existing = getExistingNodeAtPath(plan.path);
-    if(!existing) continue;
-    if(existing.isDir){
-      await appAlert(`路径冲突：${plan.path} 已是文件夹，无法新增同名文件。`, {title:"新增失败"});
-      e.target.value = "";
-      return;
+  addItemsBusy = true;
+  try{
+    const entries = [];
+    for(const file of files){
+      entries.push({
+        path:joinNodePath(baseDir, file.name),
+        bytes:new Uint8Array(await file.arrayBuffer())
+      });
     }
-    overwritePaths.push(plan.path);
+    if(rootNode === targetRoot) await addPickedEntries(entries, targetRoot);
+  }catch(err){
+    await appAlert(String(err?.message || err), {title:"导入文件失败"});
+  }finally{
+    e.target.value = "";
+    addItemsBusy = false;
   }
-
-  if(overwritePaths.length > 0){
-    const preview = overwritePaths.slice(0, 6).join("\n");
-    const extraCount = overwritePaths.length - Math.min(overwritePaths.length, 6);
-    const extraText = extraCount > 0 ? `\n... 以及另外 ${extraCount} 项` : "";
-    const ok = await appConfirm(`以下文件已存在，是否覆盖？\n\n${preview}${extraText}`, {title:"覆盖确认"});
-    if(!ok){
-      e.target.value = "";
-      return;
-    }
-  }
-
-  for(const plan of filePlans){
-    createFileAtPath(plan.path, new Uint8Array(await plan.file.arrayBuffer()), {overwrite:true});
-  }
-  sortTree(rootNode);
-  updateSidebarContext();
-  renderTree();
-  e.target.value = "";
-  showToast(`已新增 ${filePlans.length} 个文件`);
 });
 
 function getExistingNodeAtPath(path){
@@ -2490,6 +2563,27 @@ function getExistingNodeAtPath(path){
   const node = findNodeByPath(rootNode, path);
   if(node && !node.deleted) return node;
   return null;
+}
+
+async function prepareAddedFileNode(path, data){
+  const name = path.split("/").pop();
+  const file = new FileNode({name, path, data:new Uint8Array(data)});
+  const node = await expandArchiveFileNode(file);
+  file.modified = true;
+  node.modified = true;
+  return node;
+}
+
+function installAddedFileNode(node){
+  const parts = node.path.split("/");
+  parts.pop();
+  const parent = ensureDir(rootNode, parts);
+  const index = parent.children.findIndex(child => child.name === node.name && !child.deleted);
+  node.parent = parent;
+  if(node.archiveFileNode) node.archiveFileNode.parent = parent;
+  if(index === -1) parent.children.push(node);
+  else parent.children[index] = node;
+  updatePackageSaveButtonState();
 }
 
 function createFileAtPath(path, data, options={}){
@@ -2817,6 +2911,140 @@ async function saveCurrentPackageToHandle(fileHandle){
   await writable.write(data);
   await writable.close();
 }
+
+// Build a snapshot relative to the selected node, retaining its own directory name.
+// Archive containers remain files, just as they do when saving the whole package.
+async function collectSelectedSaveEntries(node){
+  const dirs = [], files = [];
+  async function visit(current, parentPath=""){
+    if(current.deleted) return;
+    const name = current === rootNode
+      ? (importSourceKind === "folder" ? originalFullName : originalBaseName)
+      : current.name;
+    if(!name || name === "." || name === ".." || /[\\/\0]/.test(name)){
+      throw new Error(`无法保存不合法的名称：${name}`);
+    }
+    const path = parentPath ? `${parentPath}/${name}` : name;
+    if(current.isDir && !current.isArchiveContainer){
+      dirs.push(path);
+      for(const child of current.children) await visit(child, path);
+    }else{
+      const data = current.isArchiveContainer
+        ? await zipDirFromNode(current)
+        : (current.path === activeEditorNodePath && hasUnsavedTextChanges()
+          ? new TextEncoder().encode(getActiveTextEditorValue())
+          : new Uint8Array(current.data));
+      files.push({path, data});
+    }
+  }
+  await visit(node);
+  return {dirs, files};
+}
+
+async function zipSelectedSaveEntries(entries){
+  const ZipLib = ensureJsZipAvailable();
+  const zip = new ZipLib();
+  for(const dir of entries.dirs) zip.folder(dir);
+  for(const file of entries.files) zip.file(file.path, file.data);
+  return zip.generateAsync({type:"uint8array", compression:"DEFLATE"});
+}
+
+function downloadSelectedData(name, data){
+  const url = URL.createObjectURL(new Blob([data], {type:"application/octet-stream"}));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+}
+
+async function writeSelectedFolderToPath(parentPath, entries, api){
+  const targetPath = joinFsPath(parentPath, entries.dirs[0]);
+  // Never merge into an existing directory: it could leave stale files or overwrite a source.
+  if(await api.exists(targetPath)){
+    throw new Error(`目标位置已存在“${entries.dirs[0]}”，请选择其他保存位置，或先重命名所选文件夹。`);
+  }
+  for(const dir of entries.dirs) await api.mkdir(joinFsPath(parentPath, dir), {recursive:true});
+  for(const file of entries.files) await api.writeFile(joinFsPath(parentPath, file.path), file.data);
+  return targetPath;
+}
+
+async function writeSelectedFolderToHandle(parentHandle, entries){
+  // Inspect both files and directories before creating anything.
+  for await(const name of parentHandle.keys()){
+    if(name === entries.dirs[0]){
+      throw new Error(`目标位置已存在“${name}”，请选择其他保存位置，或先重命名所选文件夹。`);
+    }
+  }
+  for(const dir of entries.dirs) await getDirectoryHandleForRelativePath(parentHandle, dir, true);
+  for(const file of entries.files) await writeFileToDirectoryHandle(parentHandle, file.path, file.data);
+  return `${parentHandle.name}/${entries.dirs[0]}`;
+}
+
+async function saveSelectedNode(){
+  if(savingSelectedNode || !rootNode || multiSelectedPaths.size > 1) return false;
+  const node = getSingleSelectedTreeNode();
+  if(!node || node.deleted) return false;
+  const button = document.getElementById("saveSelectedBtn");
+  savingSelectedNode = true;
+  button.disabled = true;
+  try{
+    const isFolder = node.isDir && !node.isArchiveContainer;
+    const api = getTauriFileApi();
+    // Open browser pickers before asynchronous work so user activation is retained.
+    let destination;
+    if(!api){
+      if(isFolder && typeof window.showDirectoryPicker === "function"){
+        destination = await window.showDirectoryPicker({mode:"readwrite"});
+      }else if(!isFolder && typeof window.showSaveFilePicker === "function"){
+        destination = await window.showSaveFilePicker({suggestedName:node.name});
+      }
+    }
+    const entries = await collectSelectedSaveEntries(node);
+    let savedLabel;
+    if(isFolder){
+      if(api){
+        const parentPath = await api.open({title:`选择保存“${entries.dirs[0]}”的目标位置`, directory:true, multiple:false, recursive:true});
+        if(!parentPath || Array.isArray(parentPath)) return false;
+        savedLabel = await writeSelectedFolderToPath(parentPath, entries, api);
+      }else if(destination){
+        savedLabel = await writeSelectedFolderToHandle(destination, entries);
+      }else{
+        savedLabel = `${entries.dirs[0]}.zip`;
+        downloadSelectedData(savedLabel, await zipSelectedSaveEntries(entries));
+      }
+    }else{
+      const file = entries.files[0];
+      if(api){
+        const filePath = await api.save({title:"保存所选文件", defaultPath:file.path});
+        if(!filePath) return false;
+        await api.writeFile(filePath, file.data);
+        savedLabel = filePath;
+      }else if(destination){
+        const writable = await destination.createWritable();
+        await writable.write(file.data);
+        await writable.close();
+        savedLabel = destination.name;
+      }else{
+        downloadSelectedData(file.path, file.data);
+        savedLabel = file.path;
+      }
+    }
+    showToast(`所选内容已保存：${savedLabel}`);
+    return true;
+  }catch(err){
+    if(!isAbortError(err)){
+      console.error(err);
+      await appAlert(err?.message || "保存失败，请重试。", {title:"保存所选失败"});
+    }
+    return false;
+  }finally{
+    savingSelectedNode = false;
+    button.disabled = false;
+  }
+}
+
+document.getElementById("saveSelectedBtn").addEventListener("click", saveSelectedNode);
 
 async function saveCurrentSource(){
   if(!rootNode){

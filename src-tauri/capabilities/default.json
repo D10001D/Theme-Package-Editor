@@ -8,6 +8,8 @@
     "dialog:default",
     "fs:read-files",
     "fs:allow-read-dir",
+    "fs:allow-mkdir",
+    "fs:allow-exists",
     "fs:write-files"
   ]
 }

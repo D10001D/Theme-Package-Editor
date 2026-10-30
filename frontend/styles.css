@@ -388,7 +388,8 @@
 	gap: 20px;
   }
   .main-header{
-    height:62px;
+    min-height:62px;
+    flex-shrink:0;
     background:var(--panel);
     border:1px solid var(--line);
     padding:10px 16px;

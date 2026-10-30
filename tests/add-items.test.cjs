@@ -10,7 +10,8 @@ function setup(existing = {}, confirm = true) {
     rootNode: root, selected: null, normalizePath: p => p,
     getExistingNodeAtPath: p => existing[p], appConfirm: async () => confirm,
     createDirAtPath: p => { writes.push(['dir', p]); return {}; },
-    createFileAtPath: (p, bytes) => writes.push(['file', p, ...bytes]),
+    prepareAddedFileNode: async (path, bytes) => ({path, bytes}),
+    installAddedFileNode: node => writes.push(['file', node.path, ...node.bytes]),
     sortTree() {}, updateSidebarContext() {}, renderTree() {}, showToast() {}
   });
   vm.runInContext(fn, context);

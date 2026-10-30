@@ -10,7 +10,7 @@ pub async fn pick_add_items(app: tauri::AppHandle) -> Result<Vec<(String, bool)>
             use objc2_foundation::NSString;
             let items = {
                 let panel = NSOpenPanel::openPanel(MainThreadMarker::new().unwrap());
-                panel.setTitle(Some(&NSString::from_str("选择要新增的文件或文件夹")));
+                panel.setTitle(Some(&NSString::from_str("选择要导入的文件或文件夹")));
                 panel.setCanChooseFiles(true);
                 panel.setCanChooseDirectories(true);
                 panel.setAllowsMultipleSelection(true);
